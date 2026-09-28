@@ -40,12 +40,11 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 強化版廣域登入判定（完全同步導覽列狀態）
+  // 🔍 全方位登入判定（支援 Cookie / LocalStorage / Supabase Session）
   const checkAuth = async () => {
     try {
-      // 1. 檢查 Supabase Session
+      // 1. 檢查 Supabase Client Session
       const { data: { session } } = await supabase.auth.getSession();
-
       if (session?.user) {
         setIsLoggedIn(true);
         setIsAdmin(true);
@@ -53,37 +52,60 @@ export default function FeedbackPage() {
         return;
       }
 
-      // 2. 掃描所有 LocalStorage 關鍵字 (適應手機/Messenger WebView)
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        setIsLoggedIn(true);
+        setIsAdmin(true);
+        setUser(authUser);
+        return;
+      }
+
       if (typeof window !== "undefined") {
-        for (let i = 0; i < localStorage.length; i++) {
-          const rawKey = localStorage.key(i) || "";
-          const key = rawKey.toLowerCase();
-          const val = localStorage.getItem(rawKey) || "";
+        // 2. 檢查 Cookie (SSR / Cookie-based Session)
+        const cookies = document.cookie || "";
+        if (
+          cookies.includes("sb-") ||
+          cookies.includes("auth") ||
+          cookies.includes("token") ||
+          cookies.includes("session") ||
+          cookies.includes("logged") ||
+          cookies.includes("user")
+        ) {
+          setIsLoggedIn(true);
+          setIsAdmin(true);
+          setUser({ name: "已登入學生" });
+          return;
+        }
 
-          if (
-            val &&
-            val !== "false" &&
-            val !== "null" &&
-            val !== "undefined" &&
-            (key.includes("sb-") ||
-              key.includes("user") ||
-              key.includes("auth") ||
-              key.includes("login") ||
-              key.includes("logged") ||
-              key.includes("student") ||
-              key.includes("token") ||
-              key.includes("session"))
-          ) {
-            let parsedUser = null;
-            try {
-              const parsed = JSON.parse(val);
-              parsedUser = parsed?.user || parsed;
-            } catch (e) {}
+        // 3. 檢查 LocalStorage 憑證
+        if (localStorage.length > 0) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const rawKey = localStorage.key(i) || "";
+            const val = localStorage.getItem(rawKey) || "";
+            if (!val || val === "false" || val === "null" || val === "undefined") continue;
 
-            setIsLoggedIn(true);
-            setIsAdmin(true);
-            setUser(parsedUser || { name: "學生" });
-            return;
+            const k = rawKey.toLowerCase();
+            if (
+              k.includes("sb") ||
+              k.includes("user") ||
+              k.includes("auth") ||
+              k.includes("login") ||
+              k.includes("logged") ||
+              k.includes("token") ||
+              k.includes("session") ||
+              k.includes("admin")
+            ) {
+              let parsedUser = null;
+              try {
+                const parsed = JSON.parse(val);
+                parsedUser = parsed?.user || parsed;
+              } catch (e) {}
+
+              setIsLoggedIn(true);
+              setIsAdmin(true);
+              setUser(parsedUser || { name: "已登入學生" });
+              return;
+            }
           }
         }
       }
@@ -100,6 +122,11 @@ export default function FeedbackPage() {
     fetchFeedback();
     checkAuth();
 
+    // 延遲再次確認，確保 Client 端 hydration 與 Cookie 同步
+    const timer = setTimeout(() => {
+      checkAuth();
+    }, 500);
+
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
         setIsLoggedIn(true);
@@ -111,6 +138,7 @@ export default function FeedbackPage() {
     });
 
     return () => {
+      clearTimeout(timer);
       authListener.subscription.unsubscribe();
     };
   }, []);

@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 
@@ -98,7 +98,7 @@ export default function FeedbackPage() {
                 >
                   <option value="環境與設備">🌱 環境與設備</option>
                   <option value="課程與教學">📚 課程與教學</option>
-                  <option value="活動與社團">🎉 活動與社團</option>
+                  <option value="學聯與活動">🎉 學聯與活動</option>
                   <option value="其他">💡 其他</option>
                 </select>
 

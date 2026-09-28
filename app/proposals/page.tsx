@@ -14,25 +14,35 @@ export default function ProposalsPage() {
   const [newComment, setNewComment] = useState<{ [key: string]: string }>({})
   const [userEndorsementIds, setUserEndorsementIds] = useState<string[]>([])
 
+  // 管理者回覆與狀態暫存 State
+  const [adminResponses, setAdminResponses] = useState<{ [key: string]: string }>({})
+  const [adminStatuses, setAdminStatuses] = useState<{ [key: string]: string }>({})
+
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 檢查用戶與管理員身分
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user && user.email?.endsWith('@nehs.hc.edu.tw')) {
+    
+    if (user && user.email) {
       setUser(user)
       loadUserEndorsements(user.id)
 
-      // 檢查是否為管理員
-      const { data: adminData } = await supabase
+      // 轉小寫與去除空字元進行精準比對
+      const userEmail = user.email.trim().toLowerCase()
+
+      // 查詢 admins 資料表比對管理員清單
+      const { data: adminList, error } = await supabase
         .from('admins')
-        .select('*')
-        .eq('email', user.email)
-        .single()
-      
-      if (adminData) setIsAdmin(true)
+        .select('email')
+
+      if (adminList && !error) {
+        const isAdminUser = adminList.some(
+          (a) => a.email.trim().toLowerCase() === userEmail
+        )
+        setIsAdmin(isAdminUser)
+      }
     } else {
       setUser(null)
       setIsAdmin(false)
@@ -52,10 +62,28 @@ export default function ProposalsPage() {
   }
 
   const loadProposals = async () => {
-    const { data: propData } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
-    if (propData) setProposals(propData)
+    const { data: propData } = await supabase
+      .from('proposals')
+      .select('*')
+      .order('created_at', { ascending: false })
 
-    const { data: commData } = await supabase.from('proposal_comments').select('*').order('created_at', { ascending: true })
+    if (propData) {
+      setProposals(propData)
+      const resMap: { [key: string]: string } = {}
+      const statusMap: { [key: string]: string } = {}
+      propData.forEach((p) => {
+        resMap[p.id] = p.admin_response || ''
+        statusMap[p.id] = p.status || '研議中'
+      })
+      setAdminResponses(resMap)
+      setAdminStatuses(statusMap)
+    }
+
+    const { data: commData } = await supabase
+      .from('proposal_comments')
+      .select('*')
+      .order('created_at', { ascending: true })
+
     if (commData) {
       const grouped: { [key: string]: any[] } = {}
       commData.forEach((c) => {
@@ -81,20 +109,45 @@ export default function ProposalsPage() {
     })
   }
 
+  // 管理者：更新回覆與狀態
+  const handleSaveAdminResponse = async (proposalId: string) => {
+    if (!isAdmin) return alert('非管理員權限無法執行！')
+    const responseText = adminResponses[proposalId] || ''
+    const currentStatus = adminStatuses[proposalId] || '研議中'
+
+    const { error } = await supabase
+      .from('proposals')
+      .update({
+        admin_response: responseText,
+        status: currentStatus
+      })
+      .eq('id', proposalId)
+
+    if (error) alert('儲存失敗：' + error.message)
+    else {
+      alert('已成功儲存狀態與研議回覆！')
+      loadProposals()
+    }
+  }
+
   // 管理者：刪除提案
   const handleDeleteProposal = async (proposalId: string) => {
-    if (!window.confirm('【管理員操作】確定要刪除此提案及其所有留言嗎？')) return
+    if (!isAdmin) return alert('權限不足！')
+    if (!window.confirm('【管理員操作】確定要刪除此提案及其所有留言嗎？此動作無法復原！')) return
+
     const { error } = await supabase.from('proposals').delete().eq('id', proposalId)
     if (error) alert('刪除失敗：' + error.message)
     else {
-      alert('提案已刪除！')
+      alert('提案已成功刪除！')
       loadProposals()
     }
   }
 
   // 管理者：刪除留言
   const handleDeleteComment = async (commentId: string) => {
-    if (!window.confirm('【管理員操作】確定要刪除此留言嗎？')) return
+    if (!isAdmin) return alert('權限不足！')
+    if (!window.confirm('確定要刪除此留言嗎？')) return
+
     const { error } = await supabase.from('proposal_comments').delete().eq('id', commentId)
     if (error) alert('刪除失敗：' + error.message)
     else {
@@ -176,7 +229,15 @@ export default function ProposalsPage() {
           <h1 className="text-2xl font-bold text-gray-800">💡 學生提案區</h1>
           <p className="text-sm text-gray-600 mt-1">發起校園制度改善提案，集結同學覆議連署。</p>
         </div>
-        {isAdmin && <span className="bg-purple-100 text-purple-700 font-bold text-xs px-3 py-1 rounded-full border border-purple-300">🔑 管理員權限已啟用</span>}
+        {isAdmin ? (
+          <span className="bg-purple-100 text-purple-700 font-bold text-xs px-3 py-1 rounded-full border border-purple-300">
+            🔑 幹部/管理員權限已啟用
+          </span>
+        ) : user ? (
+          <span className="bg-gray-100 text-gray-600 text-xs px-3 py-1 rounded border">
+            一般學生身份：{user.email}
+          </span>
+        ) : null}
       </div>
 
       {/* 發起提案區 */}
@@ -213,16 +274,26 @@ export default function ProposalsPage() {
           const isEndorsed = userEndorsementIds.includes(item.id)
           return (
             <div key={item.id} className="bg-white p-6 rounded-xl border shadow-sm relative">
-              {/* 管理員刪除提案按鈕 */}
-              {isAdmin && (
-                <button onClick={() => handleDeleteProposal(item.id)} className="absolute top-4 right-4 bg-red-50 text-red-600 border border-red-200 text-xs px-2.5 py-1 rounded hover:bg-red-100 font-bold">
-                  🗑️ 刪除提案
-                </button>
-              )}
-
-              <div className="flex justify-between items-center mb-2 pr-24">
-                <span className="text-xs text-gray-500">覆議連署：{item.endorsement_count || 0} 人</span>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">{item.status || '研議中'}</span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-gray-500">覆議人數：{item.endorsement_count || 0} 人</span>
+                
+                {/* 管理員更動狀態選單 */}
+                {isAdmin ? (
+                  <select
+                    value={adminStatuses[item.id] || '研議中'}
+                    onChange={(e) => setAdminStatuses({ ...adminStatuses, [item.id]: e.target.value })}
+                    className="text-xs font-bold px-2 py-1 rounded border border-purple-300 bg-purple-50 text-purple-800 outline-none"
+                  >
+                    <option value="研議中">研議中</option>
+                    <option value="辦理中">辦理中</option>
+                    <option value="已採納">已採納</option>
+                    <option value="不採納">不採納</option>
+                  </select>
+                ) : (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                    {item.status || '研議中'}
+                  </span>
+                )}
               </div>
 
               <h3 className="font-bold text-xl text-gray-800 mb-2">{item.title}</h3>
@@ -237,6 +308,39 @@ export default function ProposalsPage() {
                 {isEndorsed ? '✅ 已覆議 (點擊可取消)' : '✍️ 參與覆議連署 (+1)'}
               </button>
 
+              {/* 🎓 學權組回覆區塊 */}
+              {isAdmin ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm mb-4">
+                  <div className="font-bold text-blue-900 mb-2 flex justify-between items-center">
+                    <span>🎓 學權組回覆提案：</span>
+                    <button
+                      onClick={() => handleDeleteProposal(item.id)}
+                      className="text-xs bg-red-100 text-red-600 border border-red-300 px-2 py-1 rounded hover:bg-red-200 font-bold"
+                    >
+                      🗑️ 刪除此提案
+                    </button>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={adminResponses[item.id] || ''}
+                    onChange={(e) => setAdminResponses({ ...adminResponses, [item.id]: e.target.value })}
+                    placeholder="輸入回覆說明..."
+                    className="w-full border rounded-lg p-2.5 text-xs outline-none bg-white mb-2"
+                  />
+                  <button
+                    onClick={() => handleSaveAdminResponse(item.id)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition"
+                  >
+                    儲存回覆與狀態
+                  </button>
+                </div>
+              ) : item.admin_response ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm mb-4">
+                  <div className="font-bold text-blue-900 mb-1">🎓 學權組研議回覆：</div>
+                  <p className="text-blue-800 leading-relaxed">{item.admin_response}</p>
+                </div>
+              ) : null}
+
               {/* 討論區 */}
               <div className="border-t pt-4 mt-4">
                 <h4 className="text-xs font-bold text-gray-500 mb-3">💬 同學討論區：</h4>
@@ -244,10 +348,9 @@ export default function ProposalsPage() {
                   {(comments[item.id] || []).map((c) => (
                     <div key={c.id} className="bg-gray-50 p-2.5 rounded-lg text-xs text-gray-700 border flex justify-between items-center">
                       <span>{c.content}</span>
-                      {/* 管理員刪除留言按鈕 */}
                       {isAdmin && (
                         <button onClick={() => handleDeleteComment(c.id)} className="text-red-500 hover:text-red-700 font-bold ml-2">
-                          🗑️ 刪除
+                          [刪除]
                         </button>
                       )}
                     </div>

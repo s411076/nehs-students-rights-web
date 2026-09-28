@@ -6,6 +6,14 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// 🔒 指定管理員 Email 白名單
+const ADMIN_EMAILS = ["s411076@nehs.hc.edu.tw", "s411158@nehs.hc.edu.tw"];
+
+const checkIsAdmin = (email?: string) => {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+};
+
 export default function FeedbackPage() {
   const [feedbackList, setFeedbackList] = useState<any[]>([]);
   const [title, setTitle] = useState("");
@@ -40,28 +48,60 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 全方位登入判定（支援 Cookie / LocalStorage / Supabase Session）
+  // 🔍 嚴格比對 Email 的登入與管理員驗證
   const checkAuth = async () => {
     try {
-      // 1. 檢查 Supabase Client Session
+      // 1. Supabase Client Session
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setIsLoggedIn(true);
-        setIsAdmin(true);
         setUser(session.user);
+        setIsAdmin(checkIsAdmin(session.user.email));
         return;
       }
 
+      // 2. Supabase getUser
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (authUser) {
         setIsLoggedIn(true);
-        setIsAdmin(true);
         setUser(authUser);
+        setIsAdmin(checkIsAdmin(authUser.email));
         return;
       }
 
+      // 3. LocalStorage 備用檢查
       if (typeof window !== "undefined") {
-        // 2. 檢查 Cookie (SSR / Cookie-based Session)
+        for (let i = 0; i < localStorage.length; i++) {
+          const rawKey = localStorage.key(i) || "";
+          const val = localStorage.getItem(rawKey) || "";
+          if (!val || val === "false" || val === "null" || val === "undefined") continue;
+
+          const k = rawKey.toLowerCase();
+          if (
+            k.includes("sb") ||
+            k.includes("user") ||
+            k.includes("auth") ||
+            k.includes("login") ||
+            k.includes("logged") ||
+            k.includes("token") ||
+            k.includes("session")
+          ) {
+            let parsedObj: any = null;
+            try {
+              parsedObj = JSON.parse(val);
+            } catch (e) {}
+
+            const foundUser = parsedObj?.user || (parsedObj?.email ? parsedObj : null);
+            const foundEmail = foundUser?.email || parsedObj?.email || "";
+
+            setIsLoggedIn(true);
+            setUser(foundUser || { name: "已登入學生", email: foundEmail });
+            setIsAdmin(checkIsAdmin(foundEmail));
+            return;
+          }
+        }
+
+        // 4. Cookie 備用檢查 (無 Email 時預設非管理員)
         const cookies = document.cookie || "";
         if (
           cookies.includes("sb-") ||
@@ -72,41 +112,9 @@ export default function FeedbackPage() {
           cookies.includes("user")
         ) {
           setIsLoggedIn(true);
-          setIsAdmin(true);
           setUser({ name: "已登入學生" });
+          setIsAdmin(false);
           return;
-        }
-
-        // 3. 檢查 LocalStorage 憑證
-        if (localStorage.length > 0) {
-          for (let i = 0; i < localStorage.length; i++) {
-            const rawKey = localStorage.key(i) || "";
-            const val = localStorage.getItem(rawKey) || "";
-            if (!val || val === "false" || val === "null" || val === "undefined") continue;
-
-            const k = rawKey.toLowerCase();
-            if (
-              k.includes("sb") ||
-              k.includes("user") ||
-              k.includes("auth") ||
-              k.includes("login") ||
-              k.includes("logged") ||
-              k.includes("token") ||
-              k.includes("session") ||
-              k.includes("admin")
-            ) {
-              let parsedUser = null;
-              try {
-                const parsed = JSON.parse(val);
-                parsedUser = parsed?.user || parsed;
-              } catch (e) {}
-
-              setIsLoggedIn(true);
-              setIsAdmin(true);
-              setUser(parsedUser || { name: "已登入學生" });
-              return;
-            }
-          }
         }
       }
 
@@ -122,7 +130,6 @@ export default function FeedbackPage() {
     fetchFeedback();
     checkAuth();
 
-    // 延遲再次確認，確保 Client 端 hydration 與 Cookie 同步
     const timer = setTimeout(() => {
       checkAuth();
     }, 500);
@@ -130,8 +137,8 @@ export default function FeedbackPage() {
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
         setIsLoggedIn(true);
-        setIsAdmin(true);
         setUser(session.user);
+        setIsAdmin(checkIsAdmin(session.user.email));
       } else {
         checkAuth();
       }
@@ -151,7 +158,6 @@ export default function FeedbackPage() {
 
     const finalTitle = title.trim() || (content.length > 15 ? content.slice(0, 15) + "..." : content);
 
-    // 未勾選匿名時，優先抓取帳戶全名、名稱或 Email
     let authorName = "匿名學生";
     if (!isAnonymous) {
       authorName =

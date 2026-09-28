@@ -39,7 +39,7 @@ export default function Navbar() {
             </button>
 
             <Link className="font-extrabold text-lg tracking-tight text-gray-900 dark:text-white flex items-center gap-2" href="/">
-              🎓 竹科實心中學權組
+              🎓 竹科實中學權組
             </Link>
           </div>
 
@@ -124,3 +124,4 @@ export default function Navbar() {
     </>
   )
 }
+

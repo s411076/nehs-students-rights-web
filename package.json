@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "nehs-rights-web",
   "version": "0.1.0",
   "private": true,
@@ -28,3 +28,4 @@
     "typescript": "^5"
   }
 }
+

@@ -113,34 +113,58 @@ export default function ProposalsPage() {
     setSubmitting(false)
   }
 
-  // 2. 參與連署（覆議）- 包含防重複機制
-  const handleEndorse = async (proposalId: string, currentCount: number) => {
-    if (!user) return alert('請先登入學校帳號以參與覆議連署！')
+  // 2. 參與 / 取消連署（覆議切換）
+  const handleToggleEndorse = async (proposalId: string, currentCount: number, isEndorsed: boolean) => {
+    if (!user) return alert('請先登入學校帳號！')
 
-    // 先嘗試寫入連署表 endorsements
-    const { error: insertError } = await supabase
-      .from('endorsements')
-      .insert([
-        { target_id: proposalId, user_id: user.id, target_type: 'proposal' }
-      ])
+    if (isEndorsed) {
+      // --- 取消連署邏輯 ---
+      const confirmCancel = window.confirm('確定要取消對此提案的覆議連署嗎？')
+      if (!confirmCancel) return
 
-    // 如果已被 Unique Constraint 擋下，提示使用者並中斷
-    if (insertError) {
-      alert('您已經參與過此提案的覆議，無法重複連署！')
-      setUserEndorsementIds((prev) => [...prev, proposalId])
-      return
-    }
+      // 1. 從 endorsements 資料表刪除紀錄
+      const { error: deleteError } = await supabase
+        .from('endorsements')
+        .delete()
+        .eq('target_id', proposalId)
+        .eq('user_id', user.id)
 
-    // 寫入成功後，更新 proposals 裡面的計數
-    const newCount = (currentCount || 0) + 1
-    const { error: updateError } = await supabase
-      .from('proposals')
-      .update({ endorsement_count: newCount })
-      .eq('id', proposalId)
+      if (deleteError) {
+        return alert('取消連署失敗：' + deleteError.message)
+      }
 
-    if (updateError) {
-      alert('更新連署數失敗：' + updateError.message)
+      // 2. 更新 proposals 的人數 (-1)
+      const newCount = Math.max(0, (currentCount || 0) - 1)
+      await supabase
+        .from('proposals')
+        .update({ endorsement_count: newCount })
+        .eq('id', proposalId)
+
+      alert('已取消覆議連署。')
+      setUserEndorsementIds((prev) => prev.filter((id) => id !== proposalId))
+      loadProposals()
+
     } else {
+      // --- 新增連署邏輯 ---
+      const { error: insertError } = await supabase
+        .from('endorsements')
+        .insert([
+          { target_id: proposalId, user_id: user.id, target_type: 'proposal' }
+        ])
+
+      if (insertError) {
+        alert('連署失敗或您已連署過！')
+        setUserEndorsementIds((prev) => [...prev, proposalId])
+        return
+      }
+
+      // 更新 proposals 的人數 (+1)
+      const newCount = (currentCount || 0) + 1
+      await supabase
+        .from('proposals')
+        .update({ endorsement_count: newCount })
+        .eq('id', proposalId)
+
       alert('感謝參與覆議！連署數 +1')
       setUserEndorsementIds((prev) => [...prev, proposalId])
       loadProposals()
@@ -256,17 +280,16 @@ export default function ProposalsPage() {
               <h3 className="font-bold text-xl text-gray-800 mb-2">{item.title}</h3>
               <p className="text-gray-700 text-sm mb-4 leading-relaxed">{item.content}</p>
 
-              {/* 覆議按鈕（防重複 + Disabled 樣式） */}
+              {/* 覆議按鈕（已連署時可點擊以取消連署） */}
               <button
-                onClick={() => handleEndorse(item.id, item.endorsement_count)}
-                disabled={isEndorsed}
+                onClick={() => handleToggleEndorse(item.id, item.endorsement_count, isEndorsed)}
                 className={`font-bold text-xs px-4 py-2 rounded-lg transition flex items-center gap-1.5 mb-4 border ${
                   isEndorsed
-                    ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
+                    ? 'bg-green-50 border-green-300 text-green-700 hover:bg-red-50 hover:border-red-300 hover:text-red-600'
                     : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
                 }`}
               >
-                {isEndorsed ? '✅ 已參與覆議' : '✍️ 參與覆議連署 (+1)'}
+                {isEndorsed ? '✅ 已覆議 (點擊可取消)' : '✍️ 參與覆議連署 (+1)'}
               </button>
 
               {/* 🎓 學權組回覆 */}

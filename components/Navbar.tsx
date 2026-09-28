@@ -7,7 +7,6 @@ export default function Navbar() {
   const supabase = createClient()
   const [user, setUser] = useState<any>(null)
   const [isOpen, setIsOpen] = useState(false)
-  const [darkMode, setDarkMode] = useState(false)
 
   useEffect(() => {
     const checkUser = async () => {
@@ -15,26 +14,7 @@ export default function Navbar() {
       if (user) setUser(user)
     }
     checkUser()
-
-    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-      setDarkMode(true)
-      document.documentElement.classList.add('dark')
-    } else {
-      setDarkMode(false)
-      document.documentElement.classList.remove('dark')
-    }
   }, [])
-
-  const toggleDarkMode = () => {
-    if (darkMode) {
-      document.documentElement.classList.remove('dark')
-      localStorage.theme = 'light'
-      setDarkMode(false)
-    } else {
-      document.documentElement.classList.add('dark')
-      setDarkMode(true)
-    }
-  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -64,13 +44,6 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={toggleDarkMode}
-              className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 rounded-xl font-bold text-xs transition"
-            >
-              {darkMode ? '🌙 深色' : '☀️ 淺色'}
-            </button>
-
             {user && (
               <button
                 onClick={handleLogout}

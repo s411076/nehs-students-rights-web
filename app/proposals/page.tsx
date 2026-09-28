@@ -55,7 +55,7 @@ export default function ProposalsPage() {
 
     const authorName = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0]
     const { error } = await supabase.from('proposals').insert([
-      { title, content, author_email: user.email, author_name: authorName, status: '研議中' }
+      { title, content, author_email: user.email, author_name: authorName, status: '研議中', endorsements_count: 0 }
     ])
 
     if (error) alert('發布失敗：' + error.message)
@@ -74,6 +74,20 @@ export default function ProposalsPage() {
     if (error) alert('刪除失敗：' + error.message)
     else {
       alert('提案已成功刪除！')
+      loadProposals()
+    }
+  }
+
+  const handleEndorse = async (id: string, currentCount: number) => {
+    if (!user) return alert('請先登入才能進行覆議！')
+
+    const newCount = (currentCount || 0) + 1
+    const { error } = await supabase.from('proposals').update({ endorsements_count: newCount }).eq('id', id)
+
+    if (error) {
+      alert('覆議失敗：' + error.message)
+    } else {
+      alert('覆議成功！感謝您的支持！')
       loadProposals()
     }
   }
@@ -169,6 +183,18 @@ export default function ProposalsPage() {
               </p>
 
               <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line mb-4">{p.content}</p>
+
+              <div className="flex items-center gap-3 mb-4 pt-2">
+                <button
+                  onClick={() => handleEndorse(p.id, p.endorsements_count)}
+                  className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/80 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-bold text-xs px-3.5 py-1.5 rounded-xl transition cursor-pointer"
+                >
+                  <span>👍 覆議</span>
+                  <span className="bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-full text-xs font-extrabold">
+                    {p.endorsements_count || 0}
+                  </span>
+                </button>
+              </div>
 
               {p.reply && (
                 <div className="bg-purple-50 dark:bg-purple-950/40 border-l-4 border-purple-600 p-4 rounded-r-xl my-4">

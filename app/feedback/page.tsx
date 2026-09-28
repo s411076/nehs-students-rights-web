@@ -10,7 +10,6 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const ADMIN_EMAILS = [
   "s4111076@nehs.hc.edu.tw",
   "s411158@nehs.hc.edu.tw",
-  // 👈 若有其他成員 Email，可以在這裡繼續新增，例如: "member@nehs.hc.edu.tw"
 ];
 
 export default function FeedbackPage() {
@@ -31,7 +30,7 @@ export default function FeedbackPage() {
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  // 🔍 嚴格檢查目前登入者是否為授權的學權組成員
+  // 🔍 檢查目前登入者是否為授權的學權組成員
   const currentUserEmail = user?.email?.toLowerCase() || "";
   const isAdmin = ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(currentUserEmail);
 
@@ -98,20 +97,50 @@ export default function FeedbackPage() {
     }
 
     setLoginLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({
+
+    // 1. 先嘗試登入
+    let { data, error } = await supabase.auth.signInWithPassword({
       email: inputEmail,
       password,
     });
+
+    // 2. 若登入失敗 (帳號尚未建立)，自動調用註冊建立該管理員帳號
+    if (error && (error.message.includes("Invalid login credentials") || error.message.includes("User not found"))) {
+      const signUpRes = await supabase.auth.signUp({
+        email: inputEmail,
+        password,
+      });
+
+      if (signUpRes.error) {
+        setLoginLoading(false);
+        alert("登入與帳號建立失敗：" + signUpRes.error.message);
+        return;
+      }
+
+      if (signUpRes.data?.session) {
+        data = signUpRes.data;
+        error = null;
+      } else if (signUpRes.data?.user) {
+        // 如果 Supabase 設定了 Email 驗證，嘗試再次登入
+        const retryLogin = await supabase.auth.signInWithPassword({
+          email: inputEmail,
+          password,
+        });
+        data = retryLogin.data;
+        error = retryLogin.error;
+      }
+    }
+
     setLoginLoading(false);
 
     if (error) {
-      alert("登入失敗：" + error.message);
-    } else {
+      alert("登入失敗（請確認密碼是否正確）：" + error.message);
+    } else if (data?.user) {
       setUser(data.user);
       setShowLoginModal(false);
       setEmail("");
       setPassword("");
-      alert("已成功登入學權組管理員帳號！");
+      alert("已成功登入/開通學權組管理員帳號！");
     }
   };
 
@@ -311,7 +340,7 @@ export default function FeedbackPage() {
           <div className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-gray-800">🔐 學權組成員登入</h3>
-              <p className="text-xs text-gray-500">請輸入已授權之學權組 Email 與密碼</p>
+              <p className="text-xs text-gray-500">首次輸入將自動初始化該管理員帳號與密碼</p>
             </div>
             <form onSubmit={handleLogin} className="space-y-3">
               <div>
@@ -331,6 +360,7 @@ export default function FeedbackPage() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  placeholder="請設定/輸入密碼"
                   className="w-full p-2 border rounded text-sm text-gray-800"
                   required
                 />
@@ -348,7 +378,7 @@ export default function FeedbackPage() {
                   disabled={loginLoading}
                   className="px-4 py-1.5 text-xs bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {loginLoading ? "驗證中..." : "登入"}
+                  {loginLoading ? "處理中..." : "登入 / 設定密碼"}
                 </button>
               </div>
             </form>

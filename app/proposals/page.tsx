@@ -29,7 +29,7 @@ export default function ProposalsPage() {
   }
 
   const loadProposals = async () => {
-    const { data, error } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
+    const { data } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
     if (data) {
       setProposals(data)
       const initialDrafts: { [key: string]: string } = {}
@@ -78,31 +78,21 @@ export default function ProposalsPage() {
     }
   }
 
-  // 獨立儲存提案狀態
-  const handleSaveStatus = async (id: string) => {
+  // 同時儲存狀態與官方回覆
+  const handleSaveAll = async (id: string) => {
     setSavingId(id)
     const newStatus = statusDrafts[id] || '研議中'
-    const { error } = await supabase.from('proposals').update({ status: newStatus }).eq('id', id)
-
-    if (error) {
-      alert('修改狀態失敗：' + error.message)
-    } else {
-      alert(`提案狀態已成功更新為【${newStatus}】！`)
-      loadProposals()
-    }
-    setSavingId(null)
-  }
-
-  // 獨立儲存官方回覆
-  const handleSaveReply = async (id: string) => {
-    setSavingId(id)
     const replyText = replyInputs[id] || ''
-    const { error } = await supabase.from('proposals').update({ reply: replyText }).eq('id', id)
+
+    const { error } = await supabase.from('proposals').update({
+      status: newStatus,
+      reply: replyText
+    }).eq('id', id)
 
     if (error) {
-      alert('發布回覆失敗：' + error.message)
+      alert('儲存失敗：' + error.message)
     } else {
-      alert('官方回覆已成功更新！')
+      alert(`儲存成功！提案狀態已更新為【${newStatus}】！`)
       loadProposals()
     }
     setSavingId(null)
@@ -155,49 +145,25 @@ export default function ProposalsPage() {
           {proposals.map((p) => (
             <div id={`item-${p.id}`} key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm relative">
               
-              {/* 卡片標頭與狀態列 */}
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3">
+              {/* 卡片標頭與狀態展示 */}
+              <div className="flex justify-between items-start mb-3 pr-12">
                 <h3 className="text-xl font-bold">{p.title}</h3>
 
-                {/* 狀態展示與管理員變更區 */}
                 <div className="flex items-center gap-2">
-                  {isAdmin ? (
-                    <div className="flex items-center gap-1.5 bg-purple-50 dark:bg-purple-950/50 p-1.5 rounded-xl border border-purple-200 dark:border-purple-800">
-                      <select
-                        value={statusDrafts[p.id] || '研議中'}
-                        onChange={(e) => setStatusDrafts({ ...statusDrafts, [p.id]: e.target.value })}
-                        className="border dark:border-slate-700 bg-white dark:bg-slate-800 text-xs rounded-lg p-1.5 font-bold outline-none"
-                      >
-                        <option value="研議中">研議中</option>
-                        <option value="通過">通過</option>
-                        <option value="不通過">不通過</option>
-                        <option value="執行中">執行中</option>
-                      </select>
-
-                      <button
-                        onClick={() => handleSaveStatus(p.id)}
-                        disabled={savingId === p.id}
-                        className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
-                      >
-                        💾 儲存狀態
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-3 py-1 rounded-full font-bold">
-                      {p.status || '研議中'}
-                    </span>
-                  )}
-
-                  {isAdmin && (
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1.5 rounded-lg font-bold hover:bg-red-100 transition"
-                      title="刪除提案"
-                    >
-                      🗑️ 刪除
-                    </button>
-                  )}
+                  <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-3 py-1 rounded-full font-bold">
+                    {p.status || '研議中'}
+                  </span>
                 </div>
+
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDelete(p.id)}
+                    className="absolute top-6 right-6 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded-lg font-bold hover:bg-red-100 transition"
+                    title="刪除提案"
+                  >
+                    🗑️ 刪除
+                  </button>
+                )}
               </div>
 
               <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
@@ -214,24 +180,43 @@ export default function ProposalsPage() {
                 </div>
               )}
 
-              {/* 管理員官方回覆編輯區 */}
+              {/* 管理員控制台（整合：狀態選單 + 回覆輸入框 + 儲存按鈕） */}
               {isAdmin && (
-                <div className="mt-4 pt-4 border-t dark:border-slate-800">
-                  <label className="block text-xs font-bold text-purple-700 dark:text-purple-400 mb-2">🔑 發布 / 修改官方回覆：</label>
-                  <div className="flex gap-2">
+                <div className="mt-4 pt-4 border-t dark:border-slate-800 bg-purple-50/50 dark:bg-purple-950/20 p-4 rounded-xl border border-purple-100 dark:border-purple-900/50 space-y-3">
+                  <p className="text-xs font-bold text-purple-800 dark:text-purple-300">🔑 管理員控制台（修改狀態與官方回覆）：</p>
+                  
+                  <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                    {/* 狀態下拉選單 */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-600 dark:text-slate-400 whitespace-nowrap">提案狀態：</span>
+                      <select
+                        value={statusDrafts[p.id] || '研議中'}
+                        onChange={(e) => setStatusDrafts({ ...statusDrafts, [p.id]: e.target.value })}
+                        className="border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-800 text-xs rounded-lg p-2 font-bold outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="研議中">研議中</option>
+                        <option value="通過">通過</option>
+                        <option value="不通過">不通過</option>
+                        <option value="執行中">執行中</option>
+                      </select>
+                    </div>
+
+                    {/* 官方回覆輸入框 */}
                     <input
                       type="text"
                       placeholder="輸入官方回覆內容..."
                       value={replyInputs[p.id] || ''}
                       onChange={(e) => setReplyInputs({ ...replyInputs, [p.id]: e.target.value })}
-                      className="flex-1 border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-xs rounded-lg p-2 outline-none focus:ring-1 focus:ring-purple-500"
+                      className="flex-1 border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 text-xs rounded-lg p-2 outline-none focus:ring-2 focus:ring-purple-500"
                     />
+
+                    {/* 儲存按鈕 */}
                     <button
-                      onClick={() => handleSaveReply(p.id)}
+                      onClick={() => handleSaveAll(p.id)}
                       disabled={savingId === p.id}
-                      className="bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-4 py-2 rounded-lg transition"
+                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition shrink-0 cursor-pointer shadow-sm"
                     >
-                      💬 送出回覆
+                      💾 儲存修改
                     </button>
                   </div>
                 </div>

@@ -40,9 +40,10 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 檢查登入狀態與使用者資訊
+  // 🔍 強化版廣域登入判定（完全同步導覽列狀態）
   const checkAuth = async () => {
     try {
+      // 1. 檢查 Supabase Session
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
@@ -52,29 +53,36 @@ export default function FeedbackPage() {
         return;
       }
 
-      // 檢查 localStorage 備用登入資訊
+      // 2. 掃描所有 LocalStorage 關鍵字 (適應手機/Messenger WebView)
       if (typeof window !== "undefined") {
         for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i) || "";
-          const val = localStorage.getItem(key) || "";
+          const rawKey = localStorage.key(i) || "";
+          const key = rawKey.toLowerCase();
+          const val = localStorage.getItem(rawKey) || "";
+
           if (
             val &&
             val !== "false" &&
             val !== "null" &&
-            (key.includes("sb-") || key.includes("user") || key.includes("auth"))
+            val !== "undefined" &&
+            (key.includes("sb-") ||
+              key.includes("user") ||
+              key.includes("auth") ||
+              key.includes("login") ||
+              key.includes("logged") ||
+              key.includes("student") ||
+              key.includes("token") ||
+              key.includes("session"))
           ) {
+            let parsedUser = null;
             try {
               const parsed = JSON.parse(val);
-              if (parsed?.user) {
-                setIsLoggedIn(true);
-                setIsAdmin(true);
-                setUser(parsed.user);
-                return;
-              }
+              parsedUser = parsed?.user || parsed;
             } catch (e) {}
+
             setIsLoggedIn(true);
             setIsAdmin(true);
-            setUser({ name: "學生" });
+            setUser(parsedUser || { name: "學生" });
             return;
           }
         }

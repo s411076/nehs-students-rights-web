@@ -16,6 +16,7 @@ export default function FeedbackPage() {
 
   // Auth & Admin State
   const [user, setUser] = useState<any>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Reply & Delete State
@@ -39,29 +40,43 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 檢查登入狀態
+  // 🔍 檢查登入狀態與使用者資訊
   const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    let hasLocalUser = false;
     try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i) || "";
-        if (key.includes("user") || key.includes("auth") || key.includes("sb-")) {
-          const val = localStorage.getItem(key);
-          if (val && (val.includes("林維恩") || val.includes("H20205") || val.includes("access_token") || val.includes("s4111076"))) {
-            hasLocalUser = true;
-            break;
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setIsAdmin(true);
+        setUser(session.user);
+        return;
+      }
+
+      // 檢查 localStorage 備用登入資訊
+      if (typeof window !== "undefined") {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i) || "";
+          const val = localStorage.getItem(key) || "";
+          if (val && (key.includes("sb-") || key.includes("user") || key.includes("auth"))) {
+            try {
+              const parsed = JSON.parse(val);
+              if (parsed?.user) {
+                setIsLoggedIn(true);
+                setIsAdmin(true);
+                setUser(parsed.user);
+                return;
+              }
+            } catch (e) {}
           }
         }
       }
+
+      setIsLoggedIn(false);
+      setIsAdmin(false);
+      setUser(null);
     } catch (e) {
       console.error(e);
     }
-
-    const isLoggedIn = !!session?.user || hasLocalUser;
-    setUser(session?.user || (hasLocalUser ? { name: "學權組成員" } : null));
-    setIsAdmin(isLoggedIn);
   };
 
   useEffect(() => {
@@ -69,8 +84,13 @@ export default function FeedbackPage() {
     checkAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      setIsAdmin(!!session?.user);
-      setUser(session?.user || null);
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setIsAdmin(true);
+        setUser(session.user);
+      } else {
+        checkAuth();
+      }
     });
 
     return () => {
@@ -85,9 +105,18 @@ export default function FeedbackPage() {
     setLoading(true);
 
     const finalTitle = title.trim() || (content.length > 15 ? content.slice(0, 15) + "..." : content);
-    const authorName = isAnonymous
-      ? "匿名學生"
-      : user?.user_metadata?.full_name || user?.name || "學生";
+
+    // 未勾選匿名時，優先抓取帳戶全名、名稱或 Email
+    let authorName = "匿名學生";
+    if (!isAnonymous) {
+      authorName =
+        user?.user_metadata?.full_name ||
+        user?.user_metadata?.name ||
+        user?.user_metadata?.custom_claims?.global_name ||
+        user?.email?.split("@")[0] ||
+        user?.email ||
+        "已登入學生";
+    }
 
     const { error } = await supabase.from("feedback").insert([
       {

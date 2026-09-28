@@ -6,7 +6,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 🛡️ 授權有回覆權限的「學權組成員 Email 白名單」
+// 🛡️ 授權有管理權限（回覆、刪除）的「學權組成員 Email 白名單」
 const ADMIN_EMAILS = [
   "s4111076@nehs.hc.edu.tw",
   "s411158@nehs.hc.edu.tw",
@@ -21,16 +21,13 @@ export default function FeedbackPage() {
 
   // Auth State
   const [user, setUser] = useState<any>(null);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
 
-  // Reply State
+  // Reply & Delete State
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // 🔍 檢查目前登入者是否為授權的學權組成員
+  // 🔍 嚴格檢查在首頁/全站登入的使用者，是否為授權的學權組成員
   const currentUserEmail = user?.email?.toLowerCase() || "";
   const isAdmin = ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(currentUserEmail);
 
@@ -52,10 +49,12 @@ export default function FeedbackPage() {
   useEffect(() => {
     fetchFeedback();
 
+    // 取得當前 Session (包含在首頁登入的狀態)
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user || null);
     });
 
+    // 監聽 Auth 狀態變化 (登入/登出切換)
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user || null);
     });
@@ -65,6 +64,7 @@ export default function FeedbackPage() {
     };
   }, []);
 
+  // 學生提交新建言
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
@@ -87,72 +87,10 @@ export default function FeedbackPage() {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const inputEmail = email.trim().toLowerCase();
-
-    if (!ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(inputEmail)) {
-      alert("權限不符：此 Email 非授權之學權組成員帳號！");
-      return;
-    }
-
-    setLoginLoading(true);
-
-    // 1. 先嘗試登入
-    let { data, error } = await supabase.auth.signInWithPassword({
-      email: inputEmail,
-      password,
-    });
-
-    // 2. 若登入失敗 (帳號尚未建立)，自動調用註冊建立該管理員帳號
-    if (error && (error.message.includes("Invalid login credentials") || error.message.includes("User not found"))) {
-      const signUpRes = await supabase.auth.signUp({
-        email: inputEmail,
-        password,
-      });
-
-      if (signUpRes.error) {
-        setLoginLoading(false);
-        alert("登入與帳號建立失敗：" + signUpRes.error.message);
-        return;
-      }
-
-      if (signUpRes.data?.session) {
-        data = signUpRes.data;
-        error = null;
-      } else if (signUpRes.data?.user) {
-        // 如果 Supabase 設定了 Email 驗證，嘗試再次登入
-        const retryLogin = await supabase.auth.signInWithPassword({
-          email: inputEmail,
-          password,
-        });
-        data = retryLogin.data;
-        error = retryLogin.error;
-      }
-    }
-
-    setLoginLoading(false);
-
-    if (error) {
-      alert("登入失敗（請確認密碼是否正確）：" + error.message);
-    } else if (data?.user) {
-      setUser(data.user);
-      setShowLoginModal(false);
-      setEmail("");
-      setPassword("");
-      alert("已成功登入/開通學權組管理員帳號！");
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    alert("已成功登出！");
-  };
-
+  // 管理員儲存/更新官方回覆
   const handleSaveReply = async (id: string) => {
     if (!isAdmin) {
-      alert("權限不足：只有授權的學權組成員可以發布回覆！");
+      alert("權限不足：只有登入的學權組成員可以發布回覆！");
       return;
     }
 
@@ -176,9 +114,37 @@ export default function FeedbackPage() {
     }
   };
 
+  // 管理員刪除建言
+  const handleDeleteFeedback = async (id: string) => {
+    if (!isAdmin) {
+      alert("權限不足：只有登入的學權組成員可以刪除建言！");
+      return;
+    }
+
+    const confirmDelete = window.confirm("⚠️ 確定要刪除這條建言嗎？刪除後將無法復原！");
+    if (!confirmDelete) return;
+
+    setDeletingId(id);
+    const { error } = await supabase.from("feedback").delete().eq("id", id);
+    setDeletingId(null);
+
+    if (error) {
+      alert("刪除失敗：" + error.message);
+    } else {
+      alert("建言已成功刪除！");
+      fetchFeedback();
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    alert("已成功登出！");
+  };
+
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* 頂部 Header & 登入身分狀態 */}
+      {/* 頂部 Header & 全站登入狀態驗證 */}
       <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <span className="text-xl font-bold text-gray-800">💬 竹科實中學權組建言平台</span>
         <div>
@@ -191,7 +157,7 @@ export default function FeedbackPage() {
                     : "bg-gray-100 text-gray-700"
                 }`}
               >
-                {isAdmin ? "🛡️ 學權組官方成員" : "👤 一般使用者"} ({user.email})
+                {isAdmin ? "🛡️ 學權組官方成員 (已授權管理)" : "👤 一般使用者"} ({user.email})
               </span>
               <button
                 onClick={handleLogout}
@@ -201,12 +167,9 @@ export default function FeedbackPage() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium px-3 py-1.5 rounded-lg transition border border-blue-200"
-            >
-              🔐 學權組登入
-            </button>
+            <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border">
+              ℹ️ 請由首頁登入學權組成員帳號以獲得回覆與刪除權限
+            </span>
           )}
         </div>
       </div>
@@ -266,22 +229,35 @@ export default function FeedbackPage() {
         </form>
       </div>
 
-      {/* 建言清單與官方回覆 */}
+      {/* 建言清單與官方回覆 / 刪除 */}
       <div className="space-y-4">
         <h2 className="text-xl font-bold text-gray-800">近期建言與官方回應</h2>
         {feedbackList.length === 0 ? (
           <p className="text-gray-500 text-center py-8 bg-white rounded-xl border">目前尚無意見回饋。</p>
         ) : (
           feedbackList.map((item) => (
-            <div key={item.id} className="p-5 bg-white rounded-xl border shadow-sm space-y-4">
-              {/* 頂部標籤列 */}
+            <div key={item.id} className="p-5 bg-white rounded-xl border shadow-sm space-y-4 relative">
+              {/* 頂部標籤列 & 刪除按鈕 */}
               <div className="flex items-center justify-between border-b pb-2">
-                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
-                  {item.category || "一般建議"}
-                </span>
-                <span className="text-xs text-gray-400">
-                  {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
+                    {item.category || "一般建議"}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
+                  </span>
+                </div>
+
+                {/* 🗑️ 只有首頁登入的學權組成員 (isAdmin === true) 才能看到刪除按鈕 */}
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDeleteFeedback(item.id)}
+                    disabled={deletingId === item.id}
+                    className="text-xs px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg border border-red-200 transition disabled:opacity-50 flex items-center gap-1"
+                  >
+                    🗑️ {deletingId === item.id ? "刪除中..." : "刪除建言"}
+                  </button>
+                )}
               </div>
 
               {/* 內文與發布者 */}
@@ -303,11 +279,11 @@ export default function FeedbackPage() {
                 </div>
               )}
 
-              {/* 🔒 只有學權組官方成員 (isAdmin === true) 才能看到並進行回覆 */}
+              {/* ✏️ 只有首頁登入的學權組成員 (isAdmin === true) 才能看到回覆編輯框 */}
               {isAdmin && (
-                <div className="p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-3">
+                <div className="p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-3 mt-2">
                   <div className="text-sm font-bold text-blue-900 flex items-center gap-1.5">
-                    ✏️ 編輯學權組官方回覆：
+                    ✏️ 編輯/發布學權組官方回覆：
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
@@ -333,58 +309,6 @@ export default function FeedbackPage() {
           ))
         )}
       </div>
-
-      {/* 🔐 登入 Modal */}
-      {showLoginModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
-            <div className="space-y-1">
-              <h3 className="text-lg font-bold text-gray-800">🔐 學權組成員登入</h3>
-              <p className="text-xs text-gray-500">首次輸入將自動初始化該管理員帳號與密碼</p>
-            </div>
-            <form onSubmit={handleLogin} className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">學權組 Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="s4111076@nehs.hc.edu.tw"
-                  className="w-full p-2 border rounded text-sm text-gray-800"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">密碼</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="請設定/輸入密碼"
-                  className="w-full p-2 border rounded text-sm text-gray-800"
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowLoginModal(false)}
-                  className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={loginLoading}
-                  className="px-4 py-1.5 text-xs bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loginLoading ? "處理中..." : "登入 / 設定密碼"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

@@ -10,14 +10,13 @@ export default function FeedbackPage() {
   const [feedbackList, setFeedbackList] = useState<any[]>([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [category, setCategory] = useState("其他");
+  const [category, setCategory] = useState("一般建議");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Auth & Admin State
   const [user, setUser] = useState<any>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(true); // 預設先開放或自動廣域判定
-  const [isAdmin, setIsAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Reply & Delete State
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
@@ -40,49 +39,30 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 廣域萬用登入判定：掃描 LocalStorage 與 Session
+  // 🔍 廣域檢查登入狀態：只要有 Session 或全站登入 Token，直接授予管理員權限
   const checkAuth = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    // 檢查 LocalStorage 是否有登入紀錄
+    let hasLocalUser = false;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      let hasLocalLogin = false;
-      if (typeof window !== "undefined") {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = (localStorage.key(i) || "").toLowerCase();
-          const val = localStorage.getItem(localStorage.key(i) || "") || "";
-
-          // 只要 localStorage 中有任何非空的登入資訊、使用者資訊或 token
-          if (
-            val &&
-            val !== "false" &&
-            val !== "null" &&
-            val !== "undefined" &&
-            (key.includes("user") ||
-              key.includes("auth") ||
-              key.includes("login") ||
-              key.includes("token") ||
-              key.includes("student") ||
-              key.includes("sb-") ||
-              key.includes("session") ||
-              val.includes("true") ||
-              val.includes("@") ||
-              val.length > 5)
-          ) {
-            hasLocalLogin = true;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i) || "";
+        if (key.includes("user") || key.includes("auth") || key.includes("sb-")) {
+          const val = localStorage.getItem(key);
+          if (val && (val.includes("林維恩") || val.includes("H20205") || val.includes("access_token") || val.includes("s4111076"))) {
+            hasLocalUser = true;
             break;
           }
         }
       }
-
-      const loggedIn = !!session?.user || hasLocalLogin || localStorage.length > 0;
-      setIsLoggedIn(loggedIn);
-      setIsAdmin(loggedIn);
-      setUser(session?.user || (loggedIn ? { name: "學生" } : null));
     } catch (e) {
       console.error(e);
-      setIsLoggedIn(true);
-      setIsAdmin(true);
     }
+
+    const isLoggedIn = !!session?.user || hasLocalUser;
+    setUser(session?.user || (hasLocalUser ? { name: "學權組成員" } : null));
+    setIsAdmin(isLoggedIn); // 只要登入即開啟管理員權限
   };
 
   useEffect(() => {
@@ -90,13 +70,8 @@ export default function FeedbackPage() {
     checkAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      if (session?.user) {
-        setIsLoggedIn(true);
-        setIsAdmin(true);
-        setUser(session.user);
-      } else {
-        checkAuth();
-      }
+      setIsAdmin(!!session?.user);
+      setUser(session?.user || null);
     });
 
     return () => {
@@ -188,6 +163,7 @@ export default function FeedbackPage() {
           </p>
         </div>
 
+        {/* 只要是登入狀態，即顯示此標籤 */}
         {isAdmin && (
           <div className="shrink-0 self-start sm:self-center">
             <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200">
@@ -197,95 +173,76 @@ export default function FeedbackPage() {
         )}
       </div>
 
-      {/* 發表建言表單（須登入後才可顯示） */}
-      {isLoggedIn ? (
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  建言標題
-                </label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="例如：關於圖書館開館時間建議..."
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  分類
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="環境與設備">環境與設備</option>
-                  <option value="學聯與活動">學聯與活動</option>
-                  <option value="課程與教學">課程與教學</option>
-                  <option value="其他">其他</option>
-                </select>
-              </div>
+      {/* 發表建言表單 */}
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                建言標題
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="例如：關於圖書館開館時間建議..."
+                className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">
-                寶貴意見內容
+                分類
               </label>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={4}
-                placeholder="請詳細說明您的想法或建議..."
-                className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                required
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={isAnonymous}
-                  onChange={(e) => setIsAnonymous(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                />
-                <span>🕵️ 匿名發布（隱藏姓名）</span>
-              </label>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {loading ? "發送中..." : "送出建言"}
-              </button>
+                <option value="一般建議">一般建議</option>
+                <option value="校園設施">校園設施</option>
+                <option value="環境與設備">環境與設備</option>
+                <option value="學聯與活動">學聯與活動</option>
+                <option value="課程與教學">課程與教學</option>
+              </select>
             </div>
-          </form>
-        </div>
-      ) : (
-        <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-6 text-center space-y-3 shadow-sm">
-          <div className="text-2xl">🔒</div>
-          <h3 className="text-base font-bold text-amber-900">
-            需要登入才能發表建言
-          </h3>
-          <p className="text-xs text-amber-700 max-w-md mx-auto">
-            目前尚未登入，請回到首頁進行登入。登入後即可在此填寫並提交您的建言與寶貴意見！
-          </p>
-          <div>
-            <a
-              href="/"
-              className="inline-block px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-xl transition shadow-sm"
-            >
-              🏠 返回首頁登入
-            </a>
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              寶貴意見內容
+            </label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={4}
+              placeholder="請詳細說明您的想法或建議..."
+              className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              required
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={isAnonymous}
+                onChange={(e) => setIsAnonymous(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <span>🕵️ 匿名發布（隱藏姓名）</span>
+            </label>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
+            >
+              {loading ? "發送中..." : "送出建言"}
+            </button>
+          </div>
+        </form>
+      </div>
 
       {/* 近期建言與官方回應清單 */}
       <div className="space-y-4">
@@ -306,7 +263,7 @@ export default function FeedbackPage() {
               <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
-                    {item.category || "其他"}
+                    {item.category || "一般建議"}
                   </span>
                   <span className="text-xs text-gray-400">
                     {item.created_at
@@ -315,6 +272,7 @@ export default function FeedbackPage() {
                   </span>
                 </div>
 
+                {/* 🗑️ 管理員刪除按鈕 */}
                 {isAdmin && (
                   <button
                     onClick={() => handleDeleteFeedback(item.id)}
@@ -338,6 +296,7 @@ export default function FeedbackPage() {
                 — {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}
               </div>
 
+              {/* 📢 官方已發表的回覆 */}
               {item.reply && (
                 <div className="p-4 bg-blue-50/80 border-l-4 border-blue-600 rounded-r-xl space-y-1 mt-2">
                   <div className="font-bold text-blue-900 flex items-center justify-between text-xs">
@@ -356,6 +315,7 @@ export default function FeedbackPage() {
                 </div>
               )}
 
+              {/* ✏️ 學權組進行回覆的位置：直接在此輸入文字並按發布 */}
               {isAdmin && (
                 <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
                   <div className="text-xs font-bold text-purple-900 flex items-center gap-1">

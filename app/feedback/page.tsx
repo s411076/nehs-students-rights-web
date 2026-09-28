@@ -23,7 +23,7 @@ export default function FeedbackPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // 取得建言資料
+  // 取得建言列表
   const fetchFeedback = async () => {
     const { data, error } = await supabase
       .from("feedback")
@@ -39,23 +39,20 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 全面同步首頁登入狀態 (同時檢查 Supabase Auth 與 localStorage)
-  const syncAuthState = async () => {
+  // 🔍 廣域檢查登入狀態：只要有 Session 或全站登入 Token，直接授予管理員權限
+  const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    let currentUser = session?.user || null;
-
-    // 檢查全站 localStorage 登入紀錄
-    let localUserData: any = null;
+    
+    // 檢查 LocalStorage 是否有登入紀錄
+    let hasLocalUser = false;
     try {
-      const keys = ["currentUser", "user", "student_user", "admin_user", "sb_user"];
-      for (const key of keys) {
-        const item = localStorage.getItem(key);
-        if (item) {
-          try {
-            localUserData = JSON.parse(item);
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i) || "";
+        if (key.includes("user") || key.includes("auth") || key.includes("sb-")) {
+          const val = localStorage.getItem(key);
+          if (val && (val.includes("林維恩") || val.includes("H20205") || val.includes("access_token") || val.includes("s4111076"))) {
+            hasLocalUser = true;
             break;
-          } catch {
-            localUserData = { name: item, email: item };
           }
         }
       }
@@ -63,28 +60,18 @@ export default function FeedbackPage() {
       console.error(e);
     }
 
-    const activeUser = currentUser || localUserData;
-    setUser(activeUser);
-
-    // 判斷管理員身份：比對 Email、姓名或角色標籤
-    const userString = JSON.stringify(activeUser || {}).toLowerCase() + " " + JSON.stringify(localUserData || {}).toLowerCase();
-    const isManager =
-      userString.includes("林維恩") ||
-      userString.includes("h20205") ||
-      userString.includes("s4111076") ||
-      userString.includes("s411158") ||
-      userString.includes("admin") ||
-      userString.includes("學權組");
-
-    setIsAdmin(!!isManager);
+    const isLoggedIn = !!session?.user || hasLocalUser;
+    setUser(session?.user || (hasLocalUser ? { name: "學權組成員" } : null));
+    setIsAdmin(isLoggedIn); // 只要登入即開啟管理員權限
   };
 
   useEffect(() => {
     fetchFeedback();
-    syncAuthState();
+    checkAuth();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
-      syncAuthState();
+    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      setIsAdmin(!!session?.user);
+      setUser(session?.user || null);
     });
 
     return () => {
@@ -92,22 +79,20 @@ export default function FeedbackPage() {
     };
   }, []);
 
-  // 提交建言（修復 title violates not-null constraint 錯誤）
+  // 送出建言
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
     setLoading(true);
 
-    // 確保 title 一定有值，解決資料庫 Not-Null 限制
-    const finalTitle = title.trim() || (content.length > 15 ? content.slice(0, 15) + "..." : content) || "無標題建言";
-
+    const finalTitle = title.trim() || (content.length > 15 ? content.slice(0, 15) + "..." : content);
     const authorName = isAnonymous
       ? "匿名學生"
-      : user?.user_metadata?.full_name || user?.name || user?.email || "學生";
+      : user?.user_metadata?.full_name || user?.name || "學生";
 
     const { error } = await supabase.from("feedback").insert([
       {
-        title: finalTitle, // 傳送標題，修復報錯
+        title: finalTitle,
         content: content.trim(),
         category,
         is_anonymous: isAnonymous,
@@ -126,13 +111,8 @@ export default function FeedbackPage() {
     }
   };
 
-  // 管理員儲存/更新官方回覆
+  // 發布 / 儲存官方回覆
   const handleSaveReply = async (id: string) => {
-    if (!isAdmin) {
-      alert("權限不足：只有學權組管理員可以發布回覆！");
-      return;
-    }
-
     setSavingId(id);
     const replyText = replyInputs[id] || "";
 
@@ -153,13 +133,8 @@ export default function FeedbackPage() {
     }
   };
 
-  // 管理員刪除建言
+  // 刪除建言
   const handleDeleteFeedback = async (id: string) => {
-    if (!isAdmin) {
-      alert("權限不足：只有學權組管理員可以刪除建言！");
-      return;
-    }
-
     const confirmDelete = window.confirm("⚠️ 確定要刪除這條建言嗎？刪除後將無法復原！");
     if (!confirmDelete) return;
 
@@ -177,7 +152,7 @@ export default function FeedbackPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* 頁面頂部標題列 */}
+      {/* 標題與管理員標籤 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -188,7 +163,7 @@ export default function FeedbackPage() {
           </p>
         </div>
 
-        {/* 管理員權限標籤 (首頁登入後自動同步顯示) */}
+        {/* 只要是登入狀態，即顯示此標籤 */}
         {isAdmin && (
           <div className="shrink-0 self-start sm:self-center">
             <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200">
@@ -198,7 +173,7 @@ export default function FeedbackPage() {
         )}
       </div>
 
-      {/* 發表建言表單區塊 */}
+      {/* 發表建言表單 */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -285,7 +260,6 @@ export default function FeedbackPage() {
               key={item.id}
               className="p-5 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-3 relative"
             >
-              {/* 頂部標籤與刪除按鈕 */}
               <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
@@ -298,7 +272,7 @@ export default function FeedbackPage() {
                   </span>
                 </div>
 
-                {/* 🗑️ 管理員專用刪除按鈕 */}
+                {/* 🗑️ 管理員刪除按鈕 */}
                 {isAdmin && (
                   <button
                     onClick={() => handleDeleteFeedback(item.id)}
@@ -310,7 +284,6 @@ export default function FeedbackPage() {
                 )}
               </div>
 
-              {/* 標題與內文 */}
               {item.title && (
                 <h3 className="text-base font-bold text-gray-900">
                   {item.title}
@@ -323,7 +296,7 @@ export default function FeedbackPage() {
                 — {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}
               </div>
 
-              {/* 📢 官方回覆展示區 */}
+              {/* 📢 官方已發表的回覆 */}
               {item.reply && (
                 <div className="p-4 bg-blue-50/80 border-l-4 border-blue-600 rounded-r-xl space-y-1 mt-2">
                   <div className="font-bold text-blue-900 flex items-center justify-between text-xs">
@@ -342,11 +315,11 @@ export default function FeedbackPage() {
                 </div>
               )}
 
-              {/* ✏️ 管理員專用：發布 / 編輯官方回覆 */}
+              {/* ✏️ 學權組進行回覆的位置：直接在此輸入文字並按發布 */}
               {isAdmin && (
-                <div className="p-4 bg-purple-50/50 border border-purple-200 rounded-xl space-y-3 mt-3">
+                <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
                   <div className="text-xs font-bold text-purple-900 flex items-center gap-1">
-                    ✏️ 管理員區：發布 / 修改官方回覆
+                    ✏️ 學權組管理員回覆區：
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
@@ -358,7 +331,7 @@ export default function FeedbackPage() {
                           [item.id]: e.target.value,
                         })
                       }
-                      placeholder="請輸入學權組官方回應..."
+                      placeholder="請在此輸入官方回應內容..."
                       className="flex-1 p-2.5 border border-purple-300 rounded-xl bg-white text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
@@ -366,7 +339,7 @@ export default function FeedbackPage() {
                       disabled={savingId === item.id}
                       className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"
                     >
-                      {savingId === item.id ? "儲存中..." : "💾 發布官方回覆"}
+                      {savingId === item.id ? "發布中..." : "💾 發布官方回覆"}
                     </button>
                   </div>
                 </div>

@@ -127,9 +127,9 @@ export default function ProposalsPage() {
                       className="border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-xs rounded-lg p-1.5 font-bold"
                     >
                       <option value="研議中">研議中</option>
-                      <option value="通過">通過</option>
-                      <option value="不通過">不通過</option>
-                      <option value="執行中">執行中</option>
+                      <option value="處理中">處理中</option>
+                      <option value="已完成">已完成</option>
+                      <option value="未通過">未通過</option>
                     </select>
                     <button
                       onClick={() => handleSaveStatus(p.id)}

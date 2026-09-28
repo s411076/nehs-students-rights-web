@@ -1,38 +1,89 @@
-'use client'
+﻿'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import confetti from 'canvas-confetti'
+import Navbar from '@/components/Navbar'
 
 export default function HomePage() {
   const supabase = createClient()
+  const [user, setUser] = useState<any>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [sections, setSections] = useState<any[]>([])
+  const [proposals, setProposals] = useState<any[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
 
-  // 新增欄位 State
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 檢查管理員身分
-  const checkAdmin = async () => {
+  const [posStudent, setPosStudent] = useState({ x: 0, y: 0 })
+  const [posAdmin, setPosAdmin] = useState({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPosStudent({
+        x: Math.sin(Date.now() / 800) * 18,
+        y: Math.cos(Date.now() / 600) * 10
+      })
+      setPosAdmin({
+        x: Math.cos(Date.now() / 700) * -15,
+        y: Math.sin(Date.now() / 900) * -8
+      })
+    }, 50)
+    return () => clearInterval(interval)
+  }, [])
+
+  const triggerConfetti = () => {
+    confetti({
+      particleCount: 120,
+      spread: 80,
+      origin: { y: 0.6 }
+    })
+  }
+
+  const checkUserAndRole = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const { data } = await supabase.from('admins').select('*').eq('email', user.email).single()
-      if (data) setIsAdmin(true)
+    if (user && user.email) {
+      setUser(user)
+      const userEmail = user.email.trim().toLowerCase()
+
+      const { data: adminList } = await supabase.from('admins').select('email')
+      if (adminList) {
+        const isAdminUser = adminList.some((a) => a.email.trim().toLowerCase() === userEmail)
+        setIsAdmin(isAdminUser)
+      }
+
+      if (sessionStorage.getItem('just_logged_in') === 'true') {
+        triggerConfetti()
+        sessionStorage.removeItem('just_logged_in')
+      }
     }
   }
 
-  // 載入首頁動態欄位內容
-  const loadSections = async () => {
-    const { data } = await supabase.from('home_sections').select('*').order('created_at', { ascending: false })
-    if (data) setSections(data)
+  const loadData = async () => {
+    const { data: secData } = await supabase.from('home_sections').select('*').order('created_at', { ascending: false })
+    if (secData) setSections(secData)
+
+    const { data: propData } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
+    if (propData) setProposals(propData)
   }
 
   useEffect(() => {
-    checkAdmin()
-    loadSections()
+    checkUserAndRole()
+    loadData()
   }, [])
 
-  // 管理者：新增首頁欄位
+  const handleLogin = async (role: 'student' | 'admin') => {
+    sessionStorage.setItem('just_logged_in', 'true')
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { hd: 'nehs.hc.edu.tw' }
+      }
+    })
+  }
+
   const handleAddSection = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim() || !newContent.trim()) return
@@ -40,92 +91,146 @@ export default function HomePage() {
     setSubmitting(true)
     const { error } = await supabase.from('home_sections').insert([{ title: newTitle, content: newContent }])
 
-    if (error) {
-      alert('新增失敗：' + error.message)
-    } else {
+    if (error) alert('新增失敗：' + error.message)
+    else {
       alert('首頁欄位發布成功！')
       setNewTitle('')
       setNewContent('')
-      loadSections()
+      loadData()
     }
     setSubmitting(false)
   }
 
-  // 管理者：刪除首頁欄位
   const handleDeleteSection = async (id: string) => {
     if (!window.confirm('確定要刪除此首頁欄位嗎？')) return
     const { error } = await supabase.from('home_sections').delete().eq('id', id)
     if (error) alert('刪除失敗：' + error.message)
-    else {
-      alert('欄位已刪除！')
-      loadSections()
-    }
+    else loadData()
   }
 
+  const filteredProposals = proposals.filter(p =>
+    p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.content?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0]
+
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="text-center my-8">
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">🎓 國立實驗高級中學 學生權益網</h1>
-        <p className="text-gray-600">維護學生權益・促進校園溝通・即時反映意見</p>
-      </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
+      <Navbar />
 
-      {/* 管理員專區：發布首頁內容 */}
-      {isAdmin && (
-        <div className="bg-purple-50 border border-purple-200 p-6 rounded-xl mb-8 shadow-sm">
-          <h2 className="text-lg font-bold text-purple-900 mb-3 flex items-center gap-2">
-            🔑 管理員控制台：新增首頁內容欄位
-          </h2>
-          <form onSubmit={handleAddSection} className="space-y-3">
-            <input
-              type="text"
-              required
-              placeholder="欄位標題 (例如：113學年度第一學期 學生權益座談會公告)"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="w-full border rounded-lg p-2.5 text-sm outline-none"
-            />
-            <textarea
-              required
-              rows={3}
-              placeholder="欄位內容與公告細節..."
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              className="w-full border rounded-lg p-2.5 text-sm outline-none"
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="bg-purple-700 hover:bg-purple-800 text-white font-bold text-sm px-5 py-2 rounded-lg transition"
-            >
-              {submitting ? '發布中...' : '發布到首頁'}
-            </button>
-          </form>
+      <main className="max-w-4xl mx-auto p-6">
+        <div className="text-center my-8">
+          <h1 className="text-3xl font-extrabold mb-2">🎓 國立竹科實中 學生權益網</h1>
+          <p className="text-gray-600 dark:text-slate-400 text-sm">維護學生權益・促進校園溝通・即時反映意見</p>
         </div>
-      )}
 
-      {/* 動態首頁欄位列表 */}
-      <div className="space-y-6">
-        {sections.map((section) => (
-          <div key={section.id} className="bg-white p-6 rounded-xl border shadow-sm relative">
-            {isAdmin && (
+        {!user ? (
+          <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-8 rounded-2xl shadow-lg mb-10 text-center relative overflow-hidden">
+            <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-slate-200">請選擇身分登入系統（限 @nehs.hc.edu.tw）</h2>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-6 relative min-h-[160px]">
               <button
-                onClick={() => handleDeleteSection(section.id)}
-                className="absolute top-4 right-4 bg-red-50 text-red-600 border border-red-200 text-xs px-2.5 py-1 rounded hover:bg-red-100 font-bold"
+                onClick={() => handleLogin('student')}
+                style={{ transform: `translate(${posStudent.x}px, ${posStudent.y}px)` }}
+                className="w-full sm:w-auto flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-2xl py-6 px-10 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-150 flex items-center justify-center gap-3 cursor-pointer border-2 border-blue-400"
               >
-                🗑️ 刪除欄位
+                <span>🎓 學生登入</span>
+                <span className="text-xs bg-white/20 px-2.5 py-1 rounded-full font-normal">主要權限</span>
               </button>
-            )}
-            <h2 className="text-xl font-bold text-gray-800 mb-2">{section.title}</h2>
-            <p className="text-gray-700 text-sm whitespace-pre-line leading-relaxed">{section.content}</p>
-          </div>
-        ))}
 
-        {sections.length === 0 && (
-          <div className="bg-white p-8 rounded-xl border text-center text-gray-400 text-sm">
-            目前首頁尚無動態公告欄位。
+              <button
+                onClick={() => handleLogin('admin')}
+                style={{ transform: `translate(${posAdmin.x}px, ${posAdmin.y}px)` }}
+                className="bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-700 font-bold text-xs py-2.5 px-4 rounded-xl hover:bg-purple-200 transition-all duration-150 cursor-pointer shadow-sm"
+              >
+                🔑 學權組登入
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-blue-50 dark:bg-slate-900/80 border border-blue-200 dark:border-slate-800 p-4 rounded-xl mb-8 flex justify-between items-center">
+            <span className="font-bold text-blue-900 dark:text-blue-300">
+              🎉 歡迎回來，{userName}！
+            </span>
+            {isAdmin && (
+              <span className="bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs px-3 py-1 rounded-full font-bold">
+                學權組管理員權限
+              </span>
+            )}
           </div>
         )}
-      </div>
+
+        <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-4 rounded-xl shadow-sm mb-8">
+          <label className="block text-xs font-bold text-gray-500 dark:text-slate-400 mb-2">🔍 搜尋建言與提案</label>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="輸入關鍵字搜尋相似提案或內容..."
+            className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+          />
+          {searchQuery && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-gray-500 dark:text-slate-400">搜尋結果 ({filteredProposals.length} 筆)：</p>
+              {filteredProposals.map((p) => (
+                <div key={p.id} className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded border dark:border-slate-700 text-xs flex justify-between">
+                  <span className="font-bold">{p.title}</span>
+                  <span className="text-blue-600 dark:text-blue-400">{p.status || '研議中'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {isAdmin && (
+          <div className="bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 p-6 rounded-xl mb-8 shadow-sm">
+            <h2 className="text-lg font-bold text-purple-900 dark:text-purple-300 mb-3">🔑 管理員控制台：新增首頁動態欄位</h2>
+            <form onSubmit={handleAddSection} className="space-y-3">
+              <input
+                type="text"
+                required
+                placeholder="欄位標題..."
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="w-full border dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none"
+              />
+              <textarea
+                required
+                rows={3}
+                placeholder="欄位內容與公告細節..."
+                value={newContent}
+                onChange={(e) => setNewContent(e.target.value)}
+                className="w-full border dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none"
+              />
+              <button
+                type="submit"
+                disabled={submitting}
+                className="bg-purple-700 hover:bg-purple-800 text-white font-bold text-sm px-5 py-2 rounded-lg transition"
+              >
+                {submitting ? '發布中...' : '發布到首頁'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        <div className="space-y-6">
+          {sections.map((section) => (
+            <div key={section.id} className="bg-white dark:bg-slate-900 p-6 rounded-xl border dark:border-slate-800 shadow-sm relative">
+              {isAdmin && (
+                <button
+                  onClick={() => handleDeleteSection(section.id)}
+                  className="absolute top-4 right-4 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded font-bold"
+                >
+                  🗑️ 刪除
+                </button>
+              )}
+              <h2 className="text-xl font-bold mb-2">{section.title}</h2>
+              <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line leading-relaxed">{section.content}</p>
+            </div>
+          ))}
+        </div>
+      </main>
     </div>
   )
 }

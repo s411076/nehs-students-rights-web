@@ -78,7 +78,6 @@ export default function ProposalsPage() {
     }
   }
 
-  // 同時儲存狀態與官方回覆
   const handleSaveAll = async (id: string) => {
     setSavingId(id)
     const newStatus = statusDrafts[id] || '研議中'
@@ -145,7 +144,6 @@ export default function ProposalsPage() {
           {proposals.map((p) => (
             <div id={`item-${p.id}`} key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm relative">
               
-              {/* 卡片標頭與狀態展示 */}
               <div className="flex justify-between items-start mb-3 pr-12">
                 <h3 className="text-xl font-bold">{p.title}</h3>
 
@@ -172,7 +170,6 @@ export default function ProposalsPage() {
 
               <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line mb-4">{p.content}</p>
 
-              {/* 已發布的官方回覆 */}
               {p.reply && (
                 <div className="bg-purple-50 dark:bg-purple-950/40 border-l-4 border-purple-600 p-4 rounded-r-xl my-4">
                   <p className="text-xs font-bold text-purple-800 dark:text-purple-300 mb-1">📢 學權組官方回覆：</p>
@@ -180,13 +177,11 @@ export default function ProposalsPage() {
                 </div>
               )}
 
-              {/* 管理員控制台（整合：狀態選單 + 回覆輸入框 + 儲存按鈕） */}
               {isAdmin && (
                 <div className="mt-4 pt-4 border-t dark:border-slate-800 bg-purple-50/50 dark:bg-purple-950/20 p-4 rounded-xl border border-purple-100 dark:border-purple-900/50 space-y-3">
                   <p className="text-xs font-bold text-purple-800 dark:text-purple-300">🔑 管理員控制台（修改狀態與官方回覆）：</p>
                   
                   <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                    {/* 狀態下拉選單 */}
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-gray-600 dark:text-slate-400 whitespace-nowrap">提案狀態：</span>
                       <select
@@ -201,7 +196,6 @@ export default function ProposalsPage() {
                       </select>
                     </div>
 
-                    {/* 官方回覆輸入框 */}
                     <input
                       type="text"
                       placeholder="輸入官方回覆內容..."
@@ -210,7 +204,6 @@ export default function ProposalsPage() {
                       className="flex-1 border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 text-xs rounded-lg p-2 outline-none focus:ring-2 focus:ring-purple-500"
                     />
 
-                    {/* 儲存按鈕 */}
                     <button
                       onClick={() => handleSaveAll(p.id)}
                       disabled={savingId === p.id}

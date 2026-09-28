@@ -5,23 +5,43 @@ import { createClient } from '@/lib/supabase'
 export default function FeedbackPage() {
   const supabase = createClient()
   const [user, setUser] = useState<any>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [feedbacks, setFeedbacks] = useState<any[]>([])
+
+  const [category, setCategory] = useState('環境與設備')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const checkUser = async () => {
+  // 管理員回覆狀態
+  const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({})
+
+  const checkUserAndRole = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user) setUser(user)
+    if (user && user.email) {
+      setUser(user)
+      const userEmail = user.email.trim().toLowerCase()
+      const { data: adminList } = await supabase.from('admins').select('email')
+      if (adminList) {
+        setIsAdmin(adminList.some((a) => a.email.trim().toLowerCase() === userEmail))
+      }
+    }
   }
 
   const loadFeedbacks = async () => {
     const { data } = await supabase.from('feedback').select('*').order('created_at', { ascending: false })
-    if (data) setFeedbacks(data)
+    if (data) {
+      setFeedbacks(data)
+      const initialReplies: { [key: string]: string } = {}
+      data.forEach(f => {
+        initialReplies[f.id] = f.reply || ''
+      })
+      setReplyInputs(initialReplies)
+    }
   }
 
   useEffect(() => {
-    checkUser()
+    checkUserAndRole()
     loadFeedbacks()
   }, [])
 
@@ -43,14 +63,14 @@ export default function FeedbackPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) {
-      alert('請先登入後再發表建言/留言！')
+      alert('請先登入後再發表建言！')
       return
     }
     setSubmitting(true)
 
     const authorName = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0]
     const { error } = await supabase.from('feedback').insert([
-      { title, content, author_email: user.email, author_name: authorName }
+      { title, content, category, author_email: user.email, author_name: authorName }
     ])
 
     if (error) {
@@ -64,6 +84,27 @@ export default function FeedbackPage() {
     setSubmitting(false)
   }
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('確定要刪除這則建言嗎？')) return
+    const { error } = await supabase.from('feedback').delete().eq('id', id)
+    if (error) alert('刪除失敗：' + error.message)
+    else {
+      alert('已成功刪除該則建言！')
+      loadFeedbacks()
+    }
+  }
+
+  const handleSaveReply = async (id: string) => {
+    const replyText = replyInputs[id] || ''
+    const { error } = await supabase.from('feedback').update({ reply: replyText }).eq('id', id)
+    if (error) {
+      alert('回覆失敗：' + error.message)
+    } else {
+      alert('管理員回覆已更新！')
+      loadFeedbacks()
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
       <main className="max-w-4xl mx-auto p-6">
@@ -73,14 +114,28 @@ export default function FeedbackPage() {
           <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm mb-8">
             <h2 className="text-lg font-bold mb-4">✍️ 發表學生建議與留言</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <input
-                type="text"
-                required
-                placeholder="建議主題..."
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="flex flex-col sm:flex-row gap-3">
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none font-bold text-blue-600 dark:text-blue-400"
+                >
+                  <option value="環境與設備">🌱 環境與設備</option>
+                  <option value="教學">📚 教學</option>
+                  <option value="學聯與活動">🎉 學聯與活動</option>
+                  <option value="其他">📌 其他</option>
+                </select>
+
+                <input
+                  type="text"
+                  required
+                  placeholder="建議主題..."
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="flex-1 border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
               <textarea
                 required
                 rows={4}
@@ -89,6 +144,7 @@ export default function FeedbackPage() {
                 onChange={(e) => setContent(e.target.value)}
                 className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               />
+
               <button
                 type="submit"
                 disabled={submitting}
@@ -102,12 +158,60 @@ export default function FeedbackPage() {
 
         <div className="space-y-4">
           {feedbacks.map((f) => (
-            <div id={`item-${f.id}`} key={f.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm transition-all duration-300">
-              <h3 className="text-lg font-bold mb-1">{f.title || '學生建議'}</h3>
+            <div id={`item-${f.id}`} key={f.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm transition-all duration-300 relative">
+              <div className="flex justify-between items-start mb-2 pr-12">
+                <div>
+                  <span className="inline-block bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-2.5 py-0.5 rounded-md font-bold mb-2">
+                    {f.category || '一般建言'}
+                  </span>
+                  <h3 className="text-xl font-bold">{f.title || '學生建議'}</h3>
+                </div>
+
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDelete(f.id)}
+                    className="absolute top-6 right-6 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded-lg font-bold hover:bg-red-100 transition"
+                  >
+                    🗑️ 刪除
+                  </button>
+                )}
+              </div>
+
               <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
-                留言者：{f.author_name || '學生'} • {new Date(f.created_at).toLocaleDateString()}
+                留言者：{f.author_name || '學生'} • 發布時間：{new Date(f.created_at).toLocaleString()}
               </p>
-              <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line">{f.content}</p>
+
+              <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line mb-4">{f.content}</p>
+
+              {/* 官方回覆區塊 */}
+              {f.reply && (
+                <div className="bg-purple-50 dark:bg-purple-950/40 border-l-4 border-purple-600 p-4 rounded-r-xl my-4">
+                  <p className="text-xs font-bold text-purple-800 dark:text-purple-300 mb-1">📢 學權組官方回覆：</p>
+                  <p className="text-sm text-purple-950 dark:text-purple-200 whitespace-pre-line">{f.reply}</p>
+                </div>
+              )}
+
+              {/* 管理員專用回覆框 */}
+              {isAdmin && (
+                <div className="mt-4 pt-4 border-t dark:border-slate-800">
+                  <label className="block text-xs font-bold text-purple-700 dark:text-purple-400 mb-2">🔑 管理員官方回覆編輯區：</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="輸入官方回覆內容..."
+                      value={replyInputs[f.id] || ''}
+                      onChange={(e) => setReplyInputs({ ...replyInputs, [f.id]: e.target.value })}
+                      className="flex-1 border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-xs rounded-lg p-2 outline-none"
+                    />
+                    <button
+                      onClick={() => handleSaveReply(f.id)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition"
+                    >
+                      💬 送出回覆
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

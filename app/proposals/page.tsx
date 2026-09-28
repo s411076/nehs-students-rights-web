@@ -8,6 +8,7 @@ export default function ProposalsPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [proposals, setProposals] = useState<any[]>([])
   const [statusDrafts, setStatusDrafts] = useState<{ [key: string]: string }>({})
+  const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({})
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -30,10 +31,13 @@ export default function ProposalsPage() {
     if (data) {
       setProposals(data)
       const initialDrafts: { [key: string]: string } = {}
+      const initialReplies: { [key: string]: string } = {}
       data.forEach(p => {
         initialDrafts[p.id] = p.status || '研議中'
+        initialReplies[p.id] = p.reply || ''
       })
       setStatusDrafts(initialDrafts)
+      setReplyInputs(initialReplies)
     }
   }
 
@@ -81,13 +85,24 @@ export default function ProposalsPage() {
     setSubmitting(false)
   }
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('確定要刪除這則提案嗎？')) return
+    const { error } = await supabase.from('proposals').delete().eq('id', id)
+    if (error) alert('刪除失敗：' + error.message)
+    else {
+      alert('已成功刪除該則提案！')
+      loadProposals()
+    }
+  }
+
   const handleSaveStatus = async (id: string) => {
     const newStatus = statusDrafts[id]
-    const { error } = await supabase.from('proposals').update({ status: newStatus }).eq('id', id)
+    const replyText = replyInputs[id] || ''
+    const { error } = await supabase.from('proposals').update({ status: newStatus, reply: replyText }).eq('id', id)
     if (error) {
-      alert('狀態更新失敗：' + error.message)
+      alert('更新失敗：' + error.message)
     } else {
-      alert('提案狀態已更新並儲存！')
+      alert('提案狀態與官方回覆已儲存！')
       loadProposals()
     }
   }
@@ -130,12 +145,12 @@ export default function ProposalsPage() {
 
         <div className="space-y-4">
           {proposals.map((p) => (
-            <div id={`item-${p.id}`} key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm transition-all duration-300">
-              <div className="flex justify-between items-start mb-2">
+            <div id={`item-${p.id}`} key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm transition-all duration-300 relative">
+              <div className="flex justify-between items-start mb-2 pr-12">
                 <h3 className="text-xl font-bold">{p.title}</h3>
-                
-                {isAdmin ? (
-                  <div className="flex items-center gap-2">
+
+                <div className="flex items-center gap-2">
+                  {isAdmin ? (
                     <select
                       value={statusDrafts[p.id] || '研議中'}
                       onChange={(e) => setStatusDrafts({ ...statusDrafts, [p.id]: e.target.value })}
@@ -146,24 +161,58 @@ export default function ProposalsPage() {
                       <option value="不通過">不通過</option>
                       <option value="執行中">執行中</option>
                     </select>
-                    <button
-                      onClick={() => handleSaveStatus(p.id)}
-                      className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
-                    >
-                      💾 儲存
-                    </button>
-                  </div>
-                ) : (
-                  <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-3 py-1 rounded-full font-bold">
-                    {p.status || '研議中'}
-                  </span>
+                  ) : (
+                    <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-3 py-1 rounded-full font-bold">
+                      {p.status || '研議中'}
+                    </span>
+                  )}
+                </div>
+
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDelete(p.id)}
+                    className="absolute top-6 right-6 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded-lg font-bold hover:bg-red-100 transition"
+                  >
+                    🗑️ 刪除
+                  </button>
                 )}
               </div>
 
               <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
-                提案人：{p.author_name || '學生'}
+                提案人：{p.author_name || '學生'} • 發布時間：{new Date(p.created_at).toLocaleString()}
               </p>
-              <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line">{p.content}</p>
+
+              <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line mb-4">{p.content}</p>
+
+              {/* 官方回覆區塊 */}
+              {p.reply && (
+                <div className="bg-purple-50 dark:bg-purple-950/40 border-l-4 border-purple-600 p-4 rounded-r-xl my-4">
+                  <p className="text-xs font-bold text-purple-800 dark:text-purple-300 mb-1">📢 學權組官方回覆：</p>
+                  <p className="text-sm text-purple-950 dark:text-purple-200 whitespace-pre-line">{p.reply}</p>
+                </div>
+              )}
+
+              {/* 管理員專用回覆與狀態儲存框 */}
+              {isAdmin && (
+                <div className="mt-4 pt-4 border-t dark:border-slate-800">
+                  <label className="block text-xs font-bold text-purple-700 dark:text-purple-400 mb-2">🔑 管理員狀態與官方回覆編輯區：</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="輸入官方回覆內容..."
+                      value={replyInputs[p.id] || ''}
+                      onChange={(e) => setReplyInputs({ ...replyInputs, [p.id]: e.target.value })}
+                      className="flex-1 border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-xs rounded-lg p-2 outline-none"
+                    />
+                    <button
+                      onClick={() => handleSaveStatus(p.id)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition"
+                    >
+                      💾 儲存修改
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

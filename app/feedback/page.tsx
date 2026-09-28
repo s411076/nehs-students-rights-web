@@ -11,6 +11,7 @@ export default function FeedbackPage() {
   const [category, setCategory] = useState('環境與設備')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [isAnonymous, setIsAnonymous] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const checkUserAndRole = async () => {
@@ -41,7 +42,11 @@ export default function FeedbackPage() {
     if (!user) return alert('請先登入！')
     setSubmitting(true)
 
-    const authorName = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0]
+    // 若勾選匿名，留言者姓名顯示為「匿名學生」
+    const authorName = isAnonymous
+      ? '匿名學生'
+      : (user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0] || '學生')
+
     const { error } = await supabase.from('feedback').insert([
       { 
         category, 
@@ -49,7 +54,8 @@ export default function FeedbackPage() {
         content, 
         user_id: user.id,
         author_email: user.email, 
-        author_name: authorName 
+        author_name: authorName,
+        is_anonymous: isAnonymous
       }
     ])
 
@@ -59,6 +65,7 @@ export default function FeedbackPage() {
       alert('建言發布成功！感謝您的寶貴意見！')
       setTitle('')
       setContent('')
+      setIsAnonymous(false)
       loadFeedbacks()
     }
     setSubmitting(false)
@@ -114,13 +121,25 @@ export default function FeedbackPage() {
                 className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               />
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm px-6 py-2.5 rounded-lg transition"
-              >
-                {submitting ? '提交中...' : '提交建言'}
-              </button>
+              <div className="flex justify-between items-center pt-1">
+                <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-slate-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isAnonymous}
+                    onChange={(e) => setIsAnonymous(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  🕵️ 匿名發布（隱藏姓名）
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm px-6 py-2.5 rounded-lg transition cursor-pointer"
+                >
+                  {submitting ? '提交中...' : '提交建言'}
+                </button>
+              </div>
             </form>
           </div>
         )}
@@ -139,7 +158,7 @@ export default function FeedbackPage() {
                 {isAdmin && (
                   <button
                     onClick={() => handleDelete(f.id)}
-                    className="absolute top-6 right-6 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded-lg font-bold hover:bg-red-100 transition"
+                    className="absolute top-6 right-6 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded-lg font-bold hover:bg-red-100 transition cursor-pointer"
                   >
                     🗑️ 刪除
                   </button>
@@ -147,7 +166,7 @@ export default function FeedbackPage() {
               </div>
 
               <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">
-                留言者：{f.author_name || '學生'} • 發布時間：{new Date(f.created_at).toLocaleString()}
+                留言者：{f.author_name || '匿名學生'} • 發布時間：{new Date(f.created_at).toLocaleString()}
               </p>
 
               <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line">{f.content}</p>
@@ -158,4 +177,3 @@ export default function FeedbackPage() {
     </div>
   )
 }
-

@@ -10,7 +10,7 @@ export default function FeedbackPage() {
   const [feedbackList, setFeedbackList] = useState<any[]>([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [category, setCategory] = useState("一般建議");
+  const [category, setCategory] = useState("其他");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -39,11 +39,10 @@ export default function FeedbackPage() {
     }
   };
 
-  // 🔍 廣域檢查登入狀態：只要有 Session 或全站登入 Token，直接授予管理員權限
+  // 🔍 檢查登入狀態
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     
-    // 檢查 LocalStorage 是否有登入紀錄
     let hasLocalUser = false;
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -62,7 +61,7 @@ export default function FeedbackPage() {
 
     const isLoggedIn = !!session?.user || hasLocalUser;
     setUser(session?.user || (hasLocalUser ? { name: "學權組成員" } : null));
-    setIsAdmin(isLoggedIn); // 只要登入即開啟管理員權限
+    setIsAdmin(isLoggedIn);
   };
 
   useEffect(() => {
@@ -163,7 +162,6 @@ export default function FeedbackPage() {
           </p>
         </div>
 
-        {/* 只要是登入狀態，即顯示此標籤 */}
         {isAdmin && (
           <div className="shrink-0 self-start sm:self-center">
             <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200">
@@ -199,11 +197,10 @@ export default function FeedbackPage() {
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="一般建議">一般建議</option>
-                <option value="校園設施">校園設施</option>
                 <option value="環境與設備">環境與設備</option>
                 <option value="學聯與活動">學聯與活動</option>
                 <option value="課程與教學">課程與教學</option>
+                <option value="其他">其他</option>
               </select>
             </div>
           </div>
@@ -263,7 +260,7 @@ export default function FeedbackPage() {
               <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
-                    {item.category || "一般建議"}
+                    {item.category || "其他"}
                   </span>
                   <span className="text-xs text-gray-400">
                     {item.created_at
@@ -272,7 +269,6 @@ export default function FeedbackPage() {
                   </span>
                 </div>
 
-                {/* 🗑️ 管理員刪除按鈕 */}
                 {isAdmin && (
                   <button
                     onClick={() => handleDeleteFeedback(item.id)}
@@ -296,7 +292,6 @@ export default function FeedbackPage() {
                 — {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}
               </div>
 
-              {/* 📢 官方已發表的回覆 */}
               {item.reply && (
                 <div className="p-4 bg-blue-50/80 border-l-4 border-blue-600 rounded-r-xl space-y-1 mt-2">
                   <div className="font-bold text-blue-900 flex items-center justify-between text-xs">
@@ -315,7 +310,6 @@ export default function FeedbackPage() {
                 </div>
               )}
 
-              {/* ✏️ 學權組進行回覆的位置：直接在此輸入文字並按發布 */}
               {isAdmin && (
                 <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
                   <div className="text-xs font-bold text-purple-900 flex items-center gap-1">

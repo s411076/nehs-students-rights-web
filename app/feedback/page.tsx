@@ -16,6 +16,7 @@ export default function FeedbackPage() {
 
   // Auth & Admin State
   const [user, setUser] = useState<any>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Reply & Delete State
@@ -41,27 +42,32 @@ export default function FeedbackPage() {
 
   // 🔍 檢查登入狀態
   const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    let hasLocalUser = false;
     try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i) || "";
-        if (key.includes("user") || key.includes("auth") || key.includes("sb-")) {
-          const val = localStorage.getItem(key);
-          if (val && (val.includes("林維恩") || val.includes("H20205") || val.includes("access_token") || val.includes("s4111076"))) {
-            hasLocalUser = true;
-            break;
+      const { data: { session } } = await supabase.auth.getSession();
+
+      let hasToken = false;
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i) || "";
+          if (key.includes("sb-") || key.includes("auth") || key.includes("user")) {
+            const val = localStorage.getItem(key);
+            if (val && val.length > 10) {
+              hasToken = true;
+              break;
+            }
           }
         }
+      } catch (e) {
+        console.error(e);
       }
+
+      const loggedIn = !!session?.user || hasToken;
+      setIsLoggedIn(loggedIn);
+      setUser(session?.user || (hasToken ? { name: "學生" } : null));
+      setIsAdmin(loggedIn);
     } catch (e) {
       console.error(e);
     }
-
-    const isLoggedIn = !!session?.user || hasLocalUser;
-    setUser(session?.user || (hasLocalUser ? { name: "學權組成員" } : null));
-    setIsAdmin(isLoggedIn);
   };
 
   useEffect(() => {
@@ -69,8 +75,13 @@ export default function FeedbackPage() {
     checkAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      setIsAdmin(!!session?.user);
-      setUser(session?.user || null);
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setIsAdmin(true);
+        setUser(session.user);
+      } else {
+        checkAuth();
+      }
     });
 
     return () => {
@@ -171,75 +182,95 @@ export default function FeedbackPage() {
         )}
       </div>
 
-      {/* 發表建言表單 */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
-                建言標題
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="例如：關於圖書館開館時間建議..."
-                className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+      {/* 發表建言表單（須登入後才可顯示） */}
+      {isLoggedIn ? (
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  建言標題
+                </label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="例如：關於圖書館開館時間建議..."
+                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  分類
+                </label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="環境與設備">環境與設備</option>
+                  <option value="學聯與活動">學聯與活動</option>
+                  <option value="課程與教學">課程與教學</option>
+                  <option value="其他">其他</option>
+                </select>
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">
-                分類
+                寶貴意見內容
               </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="環境與設備">環境與設備</option>
-                <option value="學聯與活動">學聯與活動</option>
-                <option value="課程與教學">課程與教學</option>
-                <option value="其他">其他</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
-              寶貴意見內容
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={4}
-              placeholder="請詳細說明您的想法或建議..."
-              className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-              required
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
-              <input
-                type="checkbox"
-                checked={isAnonymous}
-                onChange={(e) => setIsAnonymous(e.target.checked)}
-                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={4}
+                placeholder="請詳細說明您的想法或建議..."
+                className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                required
               />
-              <span>🕵️ 匿名發布（隱藏姓名）</span>
-            </label>
+            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
+            <div className="flex items-center justify-between pt-2">
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={isAnonymous}
+                  onChange={(e) => setIsAnonymous(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span>🕵️ 匿名發布（隱藏姓名）</span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
+              >
+                {loading ? "發送中..." : "送出建言"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : (
+        <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-6 text-center space-y-3 shadow-sm">
+          <div className="text-2xl">🔒</div>
+          <h3 className="text-base font-bold text-amber-900">
+            需要登入才能發表建言
+          </h3>
+          <p className="text-xs text-amber-700 max-w-md mx-auto">
+            目前尚未登入，請回到首頁進行登入。登入後即可在此填寫並提交您的建言與寶貴意見！
+          </p>
+          <div>
+            <a
+              href="/"
+              className="inline-block px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-xl transition shadow-sm"
             >
-              {loading ? "發送中..." : "送出建言"}
-            </button>
+              🏠 返回首頁登入
+            </a>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
 
       {/* 近期建言與官方回應清單 */}
       <div className="space-y-4">

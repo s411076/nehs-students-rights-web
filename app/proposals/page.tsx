@@ -1,7 +1,6 @@
 ﻿'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import Navbar from '@/components/Navbar'
 
 export default function ProposalsPage() {
   const supabase = createClient()
@@ -80,8 +79,6 @@ export default function ProposalsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
-      <Navbar />
-
       <main className="max-w-4xl mx-auto p-6">
         <h1 className="text-2xl font-extrabold mb-6">💡 學生提案區</h1>
 
@@ -122,7 +119,6 @@ export default function ProposalsPage() {
               <div className="flex justify-between items-start mb-2">
                 <h3 className="text-xl font-bold">{p.title}</h3>
                 
-                {/* 狀態顯示或管理員編輯區 */}
                 {isAdmin ? (
                   <div className="flex items-center gap-2">
                     <select

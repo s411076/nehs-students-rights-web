@@ -1,7 +1,6 @@
 ﻿'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import Navbar from '@/components/Navbar'
 
 export default function ProfilePage() {
   const supabase = createClient()
@@ -30,7 +29,6 @@ export default function ProfilePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100">
-        <Navbar />
         <div className="max-w-4xl mx-auto p-6 text-center py-20">載入中...</div>
       </div>
     )
@@ -39,7 +37,6 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100">
-        <Navbar />
         <div className="max-w-4xl mx-auto p-6 text-center py-20 font-bold">請先登入系統。</div>
       </div>
     )
@@ -49,8 +46,6 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
-      <Navbar />
-
       <main className="max-w-4xl mx-auto p-6">
         <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-6 rounded-2xl shadow-sm mb-8">
           <h1 className="text-2xl font-extrabold mb-4 flex items-center gap-2">👤 個人帳號資訊</h1>

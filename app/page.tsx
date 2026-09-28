@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import confetti from 'canvas-confetti'
-import Navbar from '@/components/Navbar'
 
 export default function HomePage() {
   const supabase = createClient()
@@ -117,8 +116,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
-      <Navbar />
-
       <main className="max-w-4xl mx-auto p-6">
         <div className="text-center my-8">
           <h1 className="text-3xl font-extrabold mb-2">🎓 國立竹科實中 學生權益網</h1>

@@ -42,7 +42,7 @@ export default function FeedbackPage() {
     if (!user) return alert('請先登入！')
     setSubmitting(true)
 
-    // 若勾選匿名，留言者姓名顯示為「匿名學生」
+    // 若勾選匿名，留言者名稱顯示為「匿名學生」
     const authorName = isAnonymous
       ? '匿名學生'
       : (user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0] || '學生')
@@ -137,7 +137,7 @@ export default function FeedbackPage() {
                   disabled={submitting}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm px-6 py-2.5 rounded-lg transition cursor-pointer"
                 >
-                  {submitting ? '提交中...' : '提交建言'}
+                  {submitting ? '提交建言' : '提交建言'}
                 </button>
               </div>
             </form>

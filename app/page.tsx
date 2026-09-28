@@ -2,13 +2,16 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import confetti from 'canvas-confetti'
+import { useRouter } from 'next/navigation'
 
 export default function HomePage() {
   const supabase = createClient()
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [sections, setSections] = useState<any[]>([])
   const [proposals, setProposals] = useState<any[]>([])
+  const [feedbacks, setFeedbacks] = useState<any[]>([])
   const [searchQuery, setSearchQuery] = useState('')
 
   const [newTitle, setNewTitle] = useState('')
@@ -33,11 +36,7 @@ export default function HomePage() {
   }, [])
 
   const triggerConfetti = () => {
-    confetti({
-      particleCount: 120,
-      spread: 80,
-      origin: { y: 0.6 }
-    })
+    confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } })
   }
 
   const checkUserAndRole = async () => {
@@ -45,11 +44,9 @@ export default function HomePage() {
     if (user && user.email) {
       setUser(user)
       const userEmail = user.email.trim().toLowerCase()
-
       const { data: adminList } = await supabase.from('admins').select('email')
       if (adminList) {
-        const isAdminUser = adminList.some((a) => a.email.trim().toLowerCase() === userEmail)
-        setIsAdmin(isAdminUser)
+        setIsAdmin(adminList.some((a) => a.email.trim().toLowerCase() === userEmail))
       }
 
       if (sessionStorage.getItem('just_logged_in') === 'true') {
@@ -65,6 +62,9 @@ export default function HomePage() {
 
     const { data: propData } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
     if (propData) setProposals(propData)
+
+    const { data: fbData } = await supabase.from('feedback').select('*').order('created_at', { ascending: false })
+    if (fbData) setFeedbacks(fbData)
   }
 
   useEffect(() => {
@@ -107,10 +107,32 @@ export default function HomePage() {
     else loadData()
   }
 
-  const filteredProposals = proposals.filter(p =>
-    p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.content?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // 全站搜尋比對（包含提案標題/內容、建言標題/內容/留言）
+  const q = searchQuery.trim().toLowerCase()
+  const searchResults = q ? [
+    ...proposals
+      .filter(p => p.title?.toLowerCase().includes(q) || p.content?.toLowerCase().includes(q))
+      .map(p => ({
+        id: p.id,
+        type: 'proposal',
+        title: p.title || '無標題提案',
+        preview: p.content,
+        url: `/proposals#item-${p.id}`,
+        badge: '💡 學生提案',
+        status: p.status || '研議中'
+      })),
+    ...feedbacks
+      .filter(f => f.title?.toLowerCase().includes(q) || f.content?.toLowerCase().includes(q))
+      .map(f => ({
+        id: f.id,
+        type: 'feedback',
+        title: f.title || f.content?.slice(0, 20) || '無標題建言',
+        preview: f.content,
+        url: `/feedback#item-${f.id}`,
+        badge: '💬 建言/留言',
+        status: null
+      }))
+  ] : []
 
   const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0]
 
@@ -158,24 +180,56 @@ export default function HomePage() {
           </div>
         )}
 
-        <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-4 rounded-xl shadow-sm mb-8">
-          <label className="block text-xs font-bold text-gray-500 dark:text-slate-400 mb-2">🔍 搜尋建言與提案</label>
+        {/* 全站精準搜尋列 */}
+        <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-5 rounded-2xl shadow-sm mb-8">
+          <label className="block text-xs font-bold text-gray-500 dark:text-slate-400 mb-2">🔍 搜尋全站提案、建言與留言</label>
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="輸入關鍵字搜尋相似提案或內容..."
-            className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+            placeholder="輸入關鍵字搜尋（如：鞦韆、午餐、體育...）"
+            className="w-full border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
           />
-          {searchQuery && (
-            <div className="mt-3 space-y-2">
-              <p className="text-xs text-gray-500 dark:text-slate-400">搜尋結果 ({filteredProposals.length} 筆)：</p>
-              {filteredProposals.map((p) => (
-                <div key={p.id} className="p-2.5 bg-gray-50 dark:bg-slate-800 rounded border dark:border-slate-700 text-xs flex justify-between">
-                  <span className="font-bold">{p.title}</span>
-                  <span className="text-blue-600 dark:text-blue-400">{p.status || '研議中'}</span>
-                </div>
-              ))}
+
+          {searchQuery.trim() && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-bold text-gray-500 dark:text-slate-400">
+                搜尋結果 ({searchResults.length} 筆)：
+              </p>
+              {searchResults.length === 0 ? (
+                <p className="text-xs text-gray-400 py-2">找不到符合「{searchQuery}」的提案或建言。</p>
+              ) : (
+                searchResults.map((res) => (
+                  <div
+                    key={`${res.type}-${res.id}`}
+                    onClick={() => router.push(res.url)}
+                    className="p-3.5 bg-gray-50 dark:bg-slate-800/80 hover:bg-blue-50 dark:hover:bg-slate-700/80 rounded-xl border dark:border-slate-700/60 cursor-pointer transition flex justify-between items-center group"
+                  >
+                    <div className="flex-1 pr-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-slate-200">
+                          {res.badge}
+                        </span>
+                        <span className="font-bold text-sm text-gray-800 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition">
+                          {res.title}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 line-clamp-1">
+                        {res.preview}
+                      </p>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      {res.status && (
+                        <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-2.5 py-1 rounded-md">
+                          {res.status}
+                        </span>
+                      )}
+                      <span className="text-xs font-bold text-blue-600 dark:text-blue-400">👉 前往</span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>

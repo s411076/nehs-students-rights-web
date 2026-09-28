@@ -42,6 +42,21 @@ export default function ProposalsPage() {
     loadProposals()
   }, [])
 
+  // 處理網址錨點定位 (#item-id)
+  useEffect(() => {
+    if (proposals.length > 0 && typeof window !== 'undefined' && window.location.hash) {
+      const targetId = window.location.hash.replace('#', '')
+      const element = document.getElementById(targetId)
+      if (element) {
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          element.classList.add('ring-4', 'ring-blue-500', 'transition-all')
+          setTimeout(() => element.classList.remove('ring-4', 'ring-blue-500'), 3000)
+        }, 300)
+      }
+    }
+  }, [proposals])
+
   const handleCreateProposal = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) {
@@ -115,7 +130,7 @@ export default function ProposalsPage() {
 
         <div className="space-y-4">
           {proposals.map((p) => (
-            <div key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm">
+            <div id={`item-${p.id}`} key={p.id} className="bg-white dark:bg-slate-900 p-6 rounded-2xl border dark:border-slate-800 shadow-sm transition-all duration-300">
               <div className="flex justify-between items-start mb-2">
                 <h3 className="text-xl font-bold">{p.title}</h3>
                 
@@ -127,9 +142,9 @@ export default function ProposalsPage() {
                       className="border dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-xs rounded-lg p-1.5 font-bold"
                     >
                       <option value="研議中">研議中</option>
-                      <option value="處理中">處理中</option>
-                      <option value="已完成">已完成</option>
-                      <option value="未通過">未通過</option>
+                      <option value="通過">通過</option>
+                      <option value="不通過">不通過</option>
+                      <option value="執行中">執行中</option>
                     </select>
                     <button
                       onClick={() => handleSaveStatus(p.id)}

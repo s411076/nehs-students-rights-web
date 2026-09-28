@@ -6,12 +6,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 🛡️ 授權有管理權限（回覆、刪除）的「學權組成員 Email 白名單」
-const ADMIN_EMAILS = [
-  "s4111076@nehs.hc.edu.tw",
-  "s411158@nehs.hc.edu.tw",
-];
-
 export default function FeedbackPage() {
   const [feedbackList, setFeedbackList] = useState<any[]>([]);
   const [content, setContent] = useState("");
@@ -21,16 +15,14 @@ export default function FeedbackPage() {
 
   // Auth State
   const [user, setUser] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Reply & Delete State
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // 🔍 嚴格檢查在首頁/全站登入的使用者，是否為授權的學權組成員
-  const currentUserEmail = user?.email?.toLowerCase() || "";
-  const isAdmin = ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(currentUserEmail);
-
+  // 取得建言資料
   const fetchFeedback = async () => {
     const { data, error } = await supabase
       .from("feedback")
@@ -46,17 +38,40 @@ export default function FeedbackPage() {
     }
   };
 
+  // 自動同步首頁/全站登入狀態與管理員權限
   useEffect(() => {
     fetchFeedback();
 
-    // 取得當前 Session (包含在首頁登入的狀態)
+    const checkAdmin = (currentUser: any) => {
+      if (!currentUser) {
+        setIsAdmin(false);
+        return;
+      }
+      // 自動判定管理員：檢查角色、metadata 或 email 白名單
+      const role = currentUser.user_metadata?.role;
+      const email = currentUser.email?.toLowerCase() || "";
+      const isSystemAdmin =
+        role === "admin" ||
+        role === "學權組管理員" ||
+        email.includes("s4111076") ||
+        email.includes("s411158") ||
+        currentUser.user_metadata?.full_name?.includes("林維恩");
+
+      setIsAdmin(!!isSystemAdmin);
+    };
+
+    // 取得現有 Session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user || null);
+      const u = session?.user || null;
+      setUser(u);
+      checkAdmin(u);
     });
 
-    // 監聽 Auth 狀態變化 (登入/登出切換)
+    // 監聯 Auth 變化
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user || null);
+      const u = session?.user || null;
+      setUser(u);
+      checkAdmin(u);
     });
 
     return () => {
@@ -64,17 +79,22 @@ export default function FeedbackPage() {
     };
   }, []);
 
-  // 學生提交新建言
+  // 學生提交建言
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
     setLoading(true);
+
+    const authorName = isAnonymous
+      ? "匿名學生"
+      : user?.user_metadata?.full_name || user?.email || "學生";
+
     const { error } = await supabase.from("feedback").insert([
       {
         content,
         category,
         is_anonymous: isAnonymous,
-        author_name: isAnonymous ? "匿名同學" : "學生",
+        author_name: authorName,
       },
     ]);
     setLoading(false);
@@ -82,7 +102,7 @@ export default function FeedbackPage() {
       alert("提交失敗：" + error.message);
     } else {
       setContent("");
-      alert("意見已成功送出！");
+      alert("建言已成功送出！");
       fetchFeedback();
     }
   };
@@ -90,7 +110,7 @@ export default function FeedbackPage() {
   // 管理員儲存/更新官方回覆
   const handleSaveReply = async (id: string) => {
     if (!isAdmin) {
-      alert("權限不足：只有登入的學權組成員可以發布回覆！");
+      alert("權限不足：只有學權組管理員可以發布回覆！");
       return;
     }
 
@@ -117,7 +137,7 @@ export default function FeedbackPage() {
   // 管理員刪除建言
   const handleDeleteFeedback = async (id: string) => {
     if (!isAdmin) {
-      alert("權限不足：只有登入的學權組成員可以刪除建言！");
+      alert("權限不足：只有學權組管理員可以刪除建言！");
       return;
     }
 
@@ -136,56 +156,40 @@ export default function FeedbackPage() {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    alert("已成功登出！");
-  };
-
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* 頂部 Header & 全站登入狀態驗證 */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <span className="text-xl font-bold text-gray-800">💬 竹科實中學權組建言平台</span>
+      {/* 標題與管理員權限標籤（統一風格） */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div>
-          {user ? (
-            <div className="flex items-center gap-3">
-              <span
-                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                  isAdmin
-                    ? "bg-blue-100 text-blue-800 border border-blue-200"
-                    : "bg-gray-100 text-gray-700"
-                }`}
-              >
-                {isAdmin ? "🛡️ 學權組官方成員 (已授權管理)" : "👤 一般使用者"} ({user.email})
-              </span>
-              <button
-                onClick={handleLogout}
-                className="text-xs text-red-600 hover:underline font-medium"
-              >
-                登出
-              </button>
-            </div>
-          ) : (
-            <span className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border">
-              ℹ️ 請由首頁登入學權組成員帳號以獲得回覆與刪除權限
-            </span>
-          )}
+          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            💬 回饋與建言
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            歡迎向竹科實中學權組提出您的寶貴意見或學校生活中的問題！
+          </p>
         </div>
+
+        {/* 權限指示標籤 */}
+        {isAdmin && (
+          <div className="shrink-0 self-start sm:self-center">
+            <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200">
+              🔑 您目前為學權組管理員
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 發表意見表單 */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-800 mb-2">回饋與建言</h1>
-        <p className="text-gray-600 mb-6">歡迎向竹科實中學權組提出您的寶貴意見或學校生活中的問題！</p>
-
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">分類</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              分類
+            </label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full p-2.5 border rounded-lg bg-gray-50 text-gray-800"
+              className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="一般建議">一般建議</option>
               <option value="校園設施">校園設施</option>
@@ -196,13 +200,15 @@ export default function FeedbackPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">寶貴意見</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              寶貴意見
+            </label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={4}
               placeholder="請詳細說明您的想法或建議..."
-              className="w-full p-3 border rounded-lg bg-gray-50 text-gray-800 focus:bg-white transition"
+              className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
               required
             />
           </div>
@@ -213,7 +219,7 @@ export default function FeedbackPage() {
                 type="checkbox"
                 checked={isAnonymous}
                 onChange={(e) => setIsAnonymous(e.target.checked)}
-                className="w-4 h-4 text-blue-600 rounded"
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
               />
               <span>🕵️ 匿名發布（隱藏姓名）</span>
             </label>
@@ -221,34 +227,44 @@ export default function FeedbackPage() {
             <button
               type="submit"
               disabled={loading}
-              className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+              className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
             >
-              {loading ? "發送中..." : "送出建議"}
+              {loading ? "發送中..." : "送出建言"}
             </button>
           </div>
         </form>
       </div>
 
-      {/* 建言清單與官方回覆 / 刪除 */}
+      {/* 近期建言與回應清單 */}
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-gray-800">近期建言與官方回應</h2>
+        <h2 className="text-lg font-bold text-gray-800 px-1">
+          近期建言與官方回應
+        </h2>
+
         {feedbackList.length === 0 ? (
-          <p className="text-gray-500 text-center py-8 bg-white rounded-xl border">目前尚無意見回饋。</p>
+          <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
+            目前尚無意見回饋。
+          </p>
         ) : (
           feedbackList.map((item) => (
-            <div key={item.id} className="p-5 bg-white rounded-xl border shadow-sm space-y-4 relative">
-              {/* 頂部標籤列 & 刪除按鈕 */}
-              <div className="flex items-center justify-between border-b pb-2">
+            <div
+              key={item.id}
+              className="p-5 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-4 relative"
+            >
+              {/* 頂部標籤與刪除按鈕 */}
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
                     {item.category || "一般建議"}
                   </span>
                   <span className="text-xs text-gray-400">
-                    {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
+                    {item.created_at
+                      ? new Date(item.created_at).toLocaleDateString()
+                      : ""}
                   </span>
                 </div>
 
-                {/* 🗑️ 只有首頁登入的學權組成員 (isAdmin === true) 才能看到刪除按鈕 */}
+                {/* 🗑️ 管理員專用刪除按鈕 */}
                 {isAdmin && (
                   <button
                     onClick={() => handleDeleteFeedback(item.id)}
@@ -260,47 +276,58 @@ export default function FeedbackPage() {
                 )}
               </div>
 
-              {/* 內文與發布者 */}
-              <p className="text-gray-800 whitespace-pre-line text-base">{item.content}</p>
-              <div className="text-xs text-gray-500">— {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}</div>
+              {/* 建言內容 */}
+              <p className="text-gray-800 whitespace-pre-line text-sm leading-relaxed">
+                {item.content}
+              </p>
+              <div className="text-xs text-gray-400">
+                — {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}
+              </div>
 
-              {/* 📢 藍色卡片顯示官方回覆（任何人皆可查看） */}
+              {/* 📢 官方回覆展示區 */}
               {item.reply && (
-                <div className="p-4 bg-blue-50/70 border-l-4 border-blue-600 rounded-r-xl space-y-1.5">
-                  <div className="font-bold text-blue-900 flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-1.5">📢 學權組官方回覆：</span>
+                <div className="p-4 bg-blue-50/80 border-l-4 border-blue-600 rounded-r-xl space-y-1 mt-2">
+                  <div className="font-bold text-blue-900 flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1">
+                      📢 學權組官方回覆：
+                    </span>
                     {item.replied_at && (
                       <span className="text-xs text-blue-600 font-normal">
                         {new Date(item.replied_at).toLocaleDateString()}
                       </span>
                     )}
                   </div>
-                  <p className="text-blue-950 text-sm whitespace-pre-line pl-0.5">{item.reply}</p>
+                  <p className="text-blue-950 text-sm whitespace-pre-line">
+                    {item.reply}
+                  </p>
                 </div>
               )}
 
-              {/* ✏️ 只有首頁登入的學權組成員 (isAdmin === true) 才能看到回覆編輯框 */}
+              {/* ✏️ 管理員專用：回覆編輯區塊 */}
               {isAdmin && (
-                <div className="p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-3 mt-2">
-                  <div className="text-sm font-bold text-blue-900 flex items-center gap-1.5">
-                    ✏️ 編輯/發布學權組官方回覆：
+                <div className="p-4 bg-purple-50/50 border border-purple-200 rounded-xl space-y-3 mt-3">
+                  <div className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                    ✏️ 管理員區：發布 / 修改官方回覆
                   </div>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
                       type="text"
                       value={replyInputs[item.id] || ""}
                       onChange={(e) =>
-                        setReplyInputs({ ...replyInputs, [item.id]: e.target.value })
+                        setReplyInputs({
+                          ...replyInputs,
+                          [item.id]: e.target.value,
+                        })
                       }
-                      placeholder="請輸入學權組官方回應內容..."
-                      className="flex-1 p-2.5 border border-blue-300 rounded-lg bg-white text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="請輸入學權組官方回應..."
+                      className="flex-1 p-2.5 border border-purple-300 rounded-xl bg-white text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
                       onClick={() => handleSaveReply(item.id)}
                       disabled={savingId === item.id}
-                      className="px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition disabled:opacity-50 shrink-0 flex items-center justify-center gap-1 shadow-sm"
+                      className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"
                     >
-                      {savingId === item.id ? "發布中..." : "💾 儲存修改"}
+                      {savingId === item.id ? "儲存中..." : "💾 發布官方回覆"}
                     </button>
                   </div>
                 </div>

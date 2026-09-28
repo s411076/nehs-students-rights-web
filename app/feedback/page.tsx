@@ -6,10 +6,11 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 🛡️ 僅限這兩個學權組成員 Email 具備官方回覆權限
+// 🛡️ 授權有回覆權限的「學權組成員 Email 白名單」
 const ADMIN_EMAILS = [
   "s4111076@nehs.hc.edu.tw",
-  "s411158@nehs.hc.edu.tw"
+  "s411158@nehs.hc.edu.tw",
+  // 👈 若有其他成員 Email，可以在這裡繼續新增，例如: "member@nehs.hc.edu.tw"
 ];
 
 export default function FeedbackPage() {
@@ -30,8 +31,9 @@ export default function FeedbackPage() {
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  // 驗證當前登入者是否為學權組成員
-  const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
+  // 🔍 嚴格檢查目前登入者是否為授權的學權組成員
+  const currentUserEmail = user?.email?.toLowerCase() || "";
+  const isAdmin = ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(currentUserEmail);
 
   const fetchFeedback = async () => {
     const { data, error } = await supabase
@@ -50,8 +52,9 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     fetchFeedback();
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
@@ -87,12 +90,20 @@ export default function FeedbackPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    const inputEmail = email.trim().toLowerCase();
+
+    if (!ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(inputEmail)) {
+      alert("權限不符：此 Email 非授權之學權組成員帳號！");
+      return;
+    }
+
     setLoginLoading(true);
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: inputEmail,
       password,
     });
     setLoginLoading(false);
+
     if (error) {
       alert("登入失敗：" + error.message);
     } else {
@@ -100,7 +111,7 @@ export default function FeedbackPage() {
       setShowLoginModal(false);
       setEmail("");
       setPassword("");
-      alert("已成功登入！");
+      alert("已成功登入學權組管理員帳號！");
     }
   };
 
@@ -112,9 +123,10 @@ export default function FeedbackPage() {
 
   const handleSaveReply = async (id: string) => {
     if (!isAdmin) {
-      alert("權限不足：您非授權的學權組成員！");
+      alert("權限不足：只有授權的學權組成員可以發布回覆！");
       return;
     }
+
     setSavingId(id);
     const replyText = replyInputs[id] || "";
 
@@ -137,16 +149,20 @@ export default function FeedbackPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* 頂部 Header & 登入狀態列 */}
+      {/* 頂部 Header & 登入身分狀態 */}
       <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="flex items-center gap-2">
-          <span className="text-xl font-bold text-gray-800">💬 竹科實中學權組建言平台</span>
-        </div>
+        <span className="text-xl font-bold text-gray-800">💬 竹科實中學權組建言平台</span>
         <div>
           {user ? (
             <div className="flex items-center gap-3">
-              <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${isAdmin ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
-                {isAdmin ? '🛡️ 學權組官方成員' : '👤 一般使用者'} ({user.email})
+              <span
+                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                  isAdmin
+                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                    : "bg-gray-100 text-gray-700"
+                }`}
+              >
+                {isAdmin ? "🛡️ 學權組官方成員" : "👤 一般使用者"} ({user.email})
               </span>
               <button
                 onClick={handleLogout}
@@ -158,7 +174,7 @@ export default function FeedbackPage() {
           ) : (
             <button
               onClick={() => setShowLoginModal(true)}
-              className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium px-3 py-1.5 rounded-lg transition"
+              className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium px-3 py-1.5 rounded-lg transition border border-blue-200"
             >
               🔐 學權組登入
             </button>
@@ -166,9 +182,9 @@ export default function FeedbackPage() {
         </div>
       </div>
 
-      {/* 建言提交表單 */}
+      {/* 發表意見表單 */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-800 mb-2">發表回饋與建言</h1>
+        <h1 className="text-2xl font-bold text-gray-800 mb-2">回饋與建言</h1>
         <p className="text-gray-600 mb-6">歡迎向竹科實中學權組提出您的寶貴意見或學校生活中的問題！</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -181,6 +197,7 @@ export default function FeedbackPage() {
             >
               <option value="一般建議">一般建議</option>
               <option value="校園設施">校園設施</option>
+              <option value="環境與設備">環境與設備</option>
               <option value="學聯與活動">學聯與活動</option>
               <option value="課程與教學">課程與教學</option>
             </select>
@@ -240,9 +257,9 @@ export default function FeedbackPage() {
 
               {/* 內文與發布者 */}
               <p className="text-gray-800 whitespace-pre-line text-base">{item.content}</p>
-              <div className="text-xs text-gray-500">建議人：{item.author_name || "匿名同學"}</div>
+              <div className="text-xs text-gray-500">— {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}</div>
 
-              {/* 📢 藍色卡片顯示官方回覆（任何人皆可看到） */}
+              {/* 📢 藍色卡片顯示官方回覆（任何人皆可查看） */}
               {item.reply && (
                 <div className="p-4 bg-blue-50/70 border-l-4 border-blue-600 rounded-r-xl space-y-1.5">
                   <div className="font-bold text-blue-900 flex items-center justify-between text-sm">
@@ -257,9 +274,9 @@ export default function FeedbackPage() {
                 </div>
               )}
 
-              {/* 🔑 學權組成員登入後直接在畫面上進行回覆 */}
+              {/* 🔒 只有學權組官方成員 (isAdmin === true) 才能看到並進行回覆 */}
               {isAdmin && (
-                <div className="p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-3">
+                <div className="p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-3">
                   <div className="text-sm font-bold text-blue-900 flex items-center gap-1.5">
                     ✏️ 編輯學權組官方回覆：
                   </div>
@@ -278,7 +295,7 @@ export default function FeedbackPage() {
                       disabled={savingId === item.id}
                       className="px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition disabled:opacity-50 shrink-0 flex items-center justify-center gap-1 shadow-sm"
                     >
-                      💾 {savingId === item.id ? "發布中..." : "儲存修改"}
+                      {savingId === item.id ? "發布中..." : "💾 儲存修改"}
                     </button>
                   </div>
                 </div>
@@ -292,7 +309,10 @@ export default function FeedbackPage() {
       {showLoginModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
-            <h3 className="text-lg font-bold text-gray-800">🔐 學權組成員登入</h3>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-gray-800">🔐 學權組成員登入</h3>
+              <p className="text-xs text-gray-500">請輸入已授權之學權組 Email 與密碼</p>
+            </div>
             <form onSubmit={handleLogin} className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">學權組 Email</label>
@@ -328,7 +348,7 @@ export default function FeedbackPage() {
                   disabled={loginLoading}
                   className="px-4 py-1.5 text-xs bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {loginLoading ? "登入中..." : "登入"}
+                  {loginLoading ? "驗證中..." : "登入"}
                 </button>
               </div>
             </form>

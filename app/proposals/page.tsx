@@ -26,64 +26,14 @@ export default function ProposalsPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Admin Control & Interaction State
+  // Interaction States
   const [statusInputs, setStatusInputs] = useState<{ [key: string]: string }>({});
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [commentAnon, setCommentAnon] = useState<{ [key: string]: boolean }>({});
   const [commentsMap, setCommentsMap] = useState<{ [key: string]: any[] }>({});
+  const [upvotesMap, setUpvotesMap] = useState<{ [key: string]: number }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
-
-  // 🔍 精準檢測 LocalStorage 與 Session 憑證
-  const getAuthFromStorage = () => {
-    if (typeof window === "undefined") return { isLoggedIn: false, isAdmin: false, user: null };
-
-    let foundUser: any = null;
-    let foundEmail = "";
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i) || "";
-      const val = localStorage.getItem(key) || "";
-      if (!val) continue;
-
-      try {
-        const parsed = JSON.parse(val);
-        const candidateUser = parsed?.user || (parsed?.email ? parsed : null);
-        if (candidateUser && (candidateUser.email || candidateUser.id)) {
-          foundUser = candidateUser;
-          foundEmail = candidateUser.email || "";
-          break;
-        }
-      } catch (e) {}
-    }
-
-    if (foundUser) {
-      const adminFlag = checkIsAdmin(foundEmail);
-      return {
-        isLoggedIn: true,
-        isAdmin: adminFlag,
-        user: foundUser,
-      };
-    }
-
-    const cookies = document.cookie || "";
-    const hasAuthMarker =
-      cookies.includes("sb-") ||
-      cookies.includes("auth") ||
-      cookies.includes("token") ||
-      cookies.includes("session") ||
-      cookies.includes("logged");
-
-    if (hasAuthMarker) {
-      return {
-        isLoggedIn: true,
-        isAdmin: false,
-        user: { name: "已登入學生" },
-      };
-    }
-
-    return { isLoggedIn: false, isAdmin: false, user: null };
-  };
 
   // 抓取留言
   const fetchComments = async (proposalIds: string[]) => {
@@ -110,7 +60,6 @@ export default function ProposalsPage() {
 
   // 抓取提案列表
   const fetchProposals = async (adminFlag: boolean) => {
-    // 1. 公開提案 (排除待審核與被退回)
     const { data: publicData } = await supabase
       .from("proposals")
       .select("*")
@@ -132,7 +81,6 @@ export default function ProposalsPage() {
       fetchComments(pIds);
     }
 
-    // 2. 管理員抓取待審核提案
     if (adminFlag) {
       const { data: pendingData } = await supabase
         .from("proposals")
@@ -144,49 +92,82 @@ export default function ProposalsPage() {
     }
   };
 
-  // 🔍 嚴謹的權限驗證邏輯
+  // 登入驗證與權限判定
   const checkAuth = async () => {
     try {
+      let detectedUser = null;
+      let detectedLoggedIn = false;
+      let detectedAdmin = false;
+
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        const email = session.user.email || "";
-        const adminFlag = checkIsAdmin(email);
-        setIsLoggedIn(true);
-        setUser(session.user);
-        setIsAdmin(adminFlag);
-        fetchProposals(adminFlag);
-        return;
+        detectedUser = session.user;
+        detectedLoggedIn = true;
+        detectedAdmin = checkIsAdmin(session.user.email);
+      } else {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          detectedUser = authUser;
+          detectedLoggedIn = true;
+          detectedAdmin = checkIsAdmin(authUser.email);
+        } else if (typeof window !== "undefined") {
+          const cookies = document.cookie || "";
+          const hasAuthMarker =
+            cookies.includes("sb-") ||
+            cookies.includes("auth") ||
+            cookies.includes("token") ||
+            cookies.includes("session") ||
+            cookies.includes("logged");
+
+          let foundEmail = "";
+          let foundUserObj = null;
+
+          if (localStorage.length > 0) {
+            for (let i = 0; i < localStorage.length; i++) {
+              const rawKey = localStorage.key(i) || "";
+              const val = localStorage.getItem(rawKey) || "";
+              if (!val || val === "false" || val === "null" || val === "undefined") continue;
+
+              const k = rawKey.toLowerCase();
+              if (
+                k.includes("sb") ||
+                k.includes("user") ||
+                k.includes("auth") ||
+                k.includes("login") ||
+                k.includes("logged")
+              ) {
+                try {
+                  const parsed = JSON.parse(val);
+                  foundUserObj = parsed?.user || (parsed?.email ? parsed : null);
+                  foundEmail = foundUserObj?.email || parsed?.email || "";
+                } catch (e) {}
+
+                detectedLoggedIn = true;
+                break;
+              }
+            }
+          }
+
+          if (hasAuthMarker || detectedLoggedIn) {
+            detectedLoggedIn = true;
+            detectedUser = foundUserObj || { name: "已登入學生", email: foundEmail };
+            detectedAdmin = checkIsAdmin(foundEmail);
+          }
+        }
       }
 
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        const email = authUser.email || "";
-        const adminFlag = checkIsAdmin(email);
-        setIsLoggedIn(true);
-        setUser(authUser);
-        setIsAdmin(adminFlag);
-        fetchProposals(adminFlag);
-        return;
-      }
-
-      const storageAuth = getAuthFromStorage();
-      setIsLoggedIn(storageAuth.isLoggedIn);
-      setIsAdmin(storageAuth.isAdmin);
-      setUser(storageAuth.user);
-      fetchProposals(storageAuth.isAdmin);
+      setIsLoggedIn(detectedLoggedIn);
+      setIsAdmin(detectedAdmin);
+      setUser(detectedUser);
+      fetchProposals(detectedAdmin);
     } catch (e) {
       console.error(e);
-      const storageAuth = getAuthFromStorage();
-      setIsLoggedIn(storageAuth.isLoggedIn);
-      setIsAdmin(storageAuth.isAdmin);
-      setUser(storageAuth.user);
-      fetchProposals(storageAuth.isAdmin);
+      fetchProposals(false);
     }
   };
 
   useEffect(() => {
     checkAuth();
-
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
         const adminFlag = checkIsAdmin(session.user.email);
@@ -204,7 +185,7 @@ export default function ProposalsPage() {
     };
   }, []);
 
-  // 送出提案
+  // 1. 送出提案 (僅寫入 title, content, author_name, status)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
@@ -226,7 +207,6 @@ export default function ProposalsPage() {
         content: content.trim(),
         author_name: authorName,
         status: "待審核",
-        upvotes: 0,
       },
     ]);
 
@@ -241,26 +221,19 @@ export default function ProposalsPage() {
     }
   };
 
-  // 👍 覆議提案
-  const handleUpvote = async (id: string, currentUpvotes: number) => {
+  // 2. 覆議提案 (前端狀態累加，不存取不存在的 upvotes 欄位)
+  const handleUpvote = (id: string) => {
     if (!isLoggedIn) {
       alert("請先登入才能進行覆議！");
       return;
     }
-    const newVotes = (currentUpvotes || 0) + 1;
-    const { error } = await supabase
-      .from("proposals")
-      .update({ upvotes: newVotes })
-      .eq("id", id);
-
-    if (error) {
-      alert("覆議失敗：" + error.message);
-    } else {
-      fetchProposals(isAdmin);
-    }
+    setUpvotesMap((prev) => ({
+      ...prev,
+      [id]: (prev[id] || 0) + 1,
+    }));
   };
 
-  // 🔑 管理員控制台儲存修改
+  // 3. 管理員回復與狀態修改 (僅更新 status, reply)
   const handleSaveControl = async (id: string) => {
     setSavingId(id);
     const newStatus = statusInputs[id] || "研議中";
@@ -271,7 +244,6 @@ export default function ProposalsPage() {
       .update({
         status: newStatus,
         reply: newReply,
-        replied_at: new Date().toISOString(),
       })
       .eq("id", id);
 
@@ -284,7 +256,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 🔑 管理員刪除公開提案
+  // 管理員刪除提案
   const handleDeleteProposal = async (id: string) => {
     const confirmDelete = window.confirm("⚠️ 確定要刪除這條提案嗎？刪除後將無法復原！");
     if (!confirmDelete) return;
@@ -298,7 +270,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 🔑 管理員核可提案
+  // 管理員核可提案
   const handleApprove = async (id: string) => {
     const { error } = await supabase
       .from("proposals")
@@ -313,7 +285,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 🔑 管理員退回提案
+  // 管理員退回提案
   const handleReject = async (id: string) => {
     const confirmReject = window.confirm("確定要退回這項提案嗎？");
     if (!confirmReject) return;
@@ -331,7 +303,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 💬 發布討論留言
+  // 4. 發布討論留言
   const handleAddComment = async (proposalId: string) => {
     const commentText = commentInputs[proposalId] || "";
     if (!commentText.trim()) return;
@@ -357,7 +329,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 💬 刪除討論留言
+  // 刪除留言
   const handleDeleteComment = async (commentId: string, proposalId: string) => {
     const { error } = await supabase.from("proposal_comments").delete().eq("id", commentId);
     if (!error) {
@@ -367,7 +339,6 @@ export default function ProposalsPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* 標題與管理員標籤 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -387,7 +358,6 @@ export default function ProposalsPage() {
         )}
       </div>
 
-      {/* 🔑 管理員專屬：待審核提案區塊 */}
       {isAdmin && (
         <div className="bg-amber-50/60 border-2 border-amber-300 rounded-2xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center justify-between border-b border-amber-200 pb-3">
@@ -434,7 +404,6 @@ export default function ProposalsPage() {
         </div>
       )}
 
-      {/* 發表提案區塊 */}
       {isLoggedIn ? (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -501,7 +470,6 @@ export default function ProposalsPage() {
         </div>
       )}
 
-      {/* 熱門學生提案清單 */}
       <div className="space-y-4">
         <h2 className="text-lg font-bold text-gray-800 px-1">熱門學生提案</h2>
 
@@ -518,7 +486,6 @@ export default function ProposalsPage() {
                 key={item.id}
                 className="p-5 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-4 relative"
               >
-                {/* 頂部標籤與管理員刪除按鈕 */}
                 <div className="flex items-center justify-between pb-1 border-b border-gray-100">
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full border border-blue-200">
@@ -541,7 +508,6 @@ export default function ProposalsPage() {
                   )}
                 </div>
 
-                {/* 提案內容 */}
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">{item.title}</h3>
                   <div className="text-xs text-gray-400 mt-1">
@@ -554,17 +520,15 @@ export default function ProposalsPage() {
                   {item.content}
                 </p>
 
-                {/* 👍 覆議按鈕 */}
                 <div className="pt-1">
                   <button
-                    onClick={() => handleUpvote(item.id, item.upvotes)}
+                    onClick={() => handleUpvote(item.id)}
                     className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-full border border-blue-200 transition flex items-center gap-1.5 shadow-sm"
                   >
-                    👍 覆議 <span className="bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded-full text-[11px]">{item.upvotes || 0}</span>
+                    👍 覆議 <span className="bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded-full text-[11px]">{upvotesMap[item.id] || 0}</span>
                   </button>
                 </div>
 
-                {/* 🔑 管理員控制台 */}
                 {isAdmin && (
                   <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
                     <div className="text-xs font-bold text-purple-900 flex items-center gap-1">
@@ -605,7 +569,6 @@ export default function ProposalsPage() {
                   </div>
                 )}
 
-                {/* 📢 官方回覆展示區 */}
                 {item.reply && (
                   <div className="p-4 bg-purple-50/80 border-l-4 border-purple-600 rounded-r-xl space-y-1 mt-2">
                     <div className="font-bold text-purple-900 flex items-center gap-1 text-xs">
@@ -619,7 +582,6 @@ export default function ProposalsPage() {
 
                 <hr className="border-gray-100 my-2" />
 
-                {/* 💬 討論與留言區 */}
                 <div className="space-y-3 pt-1">
                   <div className="text-xs font-bold text-gray-700 flex items-center gap-1">
                     💬 討論與留言 ({comments.length})

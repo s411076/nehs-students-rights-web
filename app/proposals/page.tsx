@@ -249,22 +249,27 @@ export default function ProposalsPage() {
       return;
     }
 
+    const isCurrentlyVoted = votedIds.includes(id);
     let updatedVotedIds: string[];
-    let delta = 0;
+    let newCount = 0;
 
-    if (votedIds.includes(id)) {
+    if (isCurrentlyVoted) {
+      // 取消聯署
       updatedVotedIds = votedIds.filter((vId) => vId !== id);
-      delta = -1;
+      const prev = upvotesMap[id] !== undefined ? upvotesMap[id] : 1;
+      newCount = Math.max(0, prev - 1);
     } else {
+      // 新增覆議
       updatedVotedIds = [...votedIds, id];
-      delta = 1;
+      const prev = upvotesMap[id] || 0;
+      newCount = prev + 1;
     }
 
     setVotedIds(updatedVotedIds);
 
     const newMap = {
       ...upvotesMap,
-      [id]: Math.max(0, (upvotesMap[id] || 0) + delta),
+      [id]: newCount,
     };
     setUpvotesMap(newMap);
 
@@ -514,7 +519,8 @@ export default function ProposalsPage() {
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
             const isVoted = votedIds.includes(item.id);
-            const currentCount = upvotesMap[item.id] || 0;
+            const rawCount = upvotesMap[item.id] || 0;
+            const currentCount = isVoted ? Math.max(1, rawCount) : rawCount;
 
             return (
               <div

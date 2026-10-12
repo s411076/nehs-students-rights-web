@@ -33,9 +33,20 @@ export default function ProposalsPage() {
   const [commentAnon, setCommentAnon] = useState<{ [key: string]: boolean }>({});
   const [commentsMap, setCommentsMap] = useState<{ [key: string]: any[] }>({});
   const [upvotesMap, setUpvotesMap] = useState<{ [key: string]: number }>({});
+  const [votedIds, setVotedIds] = useState<string[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  // 抓取留言
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("voted_proposals");
+      if (saved) {
+        try {
+          setVotedIds(JSON.parse(saved));
+        } catch (e) {}
+      }
+    }
+  }, []);
+
   const fetchComments = async (proposalIds: string[]) => {
     if (!proposalIds.length) return;
     try {
@@ -58,7 +69,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 抓取提案列表
   const fetchProposals = async (adminFlag: boolean) => {
     const { data: publicData } = await supabase
       .from("proposals")
@@ -92,7 +102,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 登入驗證與權限判定
   const checkAuth = async () => {
     try {
       let detectedUser = null;
@@ -185,7 +194,7 @@ export default function ProposalsPage() {
     };
   }, []);
 
-  // 1. 送出提案 (僅寫入 title, content, author_name, status)
+  // 送出提案 (優先使用用戶真實姓名)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
@@ -194,12 +203,10 @@ export default function ProposalsPage() {
     const rawTitle = title.trim();
     const finalTitle = rawTitle.startsWith("[") ? rawTitle : `[${category}] ${rawTitle}`;
 
-    const authorName =
-      user?.user_metadata?.full_name ||
-      user?.user_metadata?.name ||
-      user?.email?.split("@")[0] ||
-      user?.email ||
-      "已登入學生";
+    const realName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+    const userEmail = user?.email || "";
+    const emailPrefix = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
+    const authorName = realName || emailPrefix || "已登入學生";
 
     const { error } = await supabase.from("proposals").insert([
       {
@@ -221,19 +228,35 @@ export default function ProposalsPage() {
     }
   };
 
-  // 2. 覆議提案 (前端狀態累加，不存取不存在的 upvotes 欄位)
+  // 👍 覆議按鈕（第一次點擊＋1，再次點擊－1 取消聯署）
   const handleUpvote = (id: string) => {
     if (!isLoggedIn) {
       alert("請先登入才能進行覆議！");
       return;
     }
+
+    let updatedVotedIds: string[];
+    let delta = 0;
+
+    if (votedIds.includes(id)) {
+      updatedVotedIds = votedIds.filter((vId) => vId !== id);
+      delta = -1;
+    } else {
+      updatedVotedIds = [...votedIds, id];
+      delta = 1;
+    }
+
+    setVotedIds(updatedVotedIds);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("voted_proposals", JSON.stringify(updatedVotedIds));
+    }
+
     setUpvotesMap((prev) => ({
       ...prev,
-      [id]: (prev[id] || 0) + 1,
+      [id]: Math.max(0, (prev[id] || 0) + delta),
     }));
   };
 
-  // 3. 管理員回復與狀態修改 (僅更新 status, reply)
   const handleSaveControl = async (id: string) => {
     setSavingId(id);
     const newStatus = statusInputs[id] || "研議中";
@@ -256,7 +279,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 管理員刪除提案
   const handleDeleteProposal = async (id: string) => {
     const confirmDelete = window.confirm("⚠️ 確定要刪除這條提案嗎？刪除後將無法復原！");
     if (!confirmDelete) return;
@@ -270,7 +292,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 管理員核可提案
   const handleApprove = async (id: string) => {
     const { error } = await supabase
       .from("proposals")
@@ -285,7 +306,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 管理員退回提案
   const handleReject = async (id: string) => {
     const confirmReject = window.confirm("確定要退回這項提案嗎？");
     if (!confirmReject) return;
@@ -303,15 +323,15 @@ export default function ProposalsPage() {
     }
   };
 
-  // 4. 發布討論留言
   const handleAddComment = async (proposalId: string) => {
     const commentText = commentInputs[proposalId] || "";
     if (!commentText.trim()) return;
 
     const isAnon = commentAnon[proposalId] || false;
-    const authorName = isAnon
-      ? "匿名學生"
-      : user?.user_metadata?.full_name || user?.user_metadata?.name || user?.name || "已登入學生";
+    const realName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+    const userEmail = user?.email || "";
+    const emailPrefix = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
+    const authorName = isAnon ? "匿名學生" : realName || emailPrefix || "已登入學生";
 
     const { error } = await supabase.from("proposal_comments").insert([
       {
@@ -329,7 +349,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 刪除留言
   const handleDeleteComment = async (commentId: string, proposalId: string) => {
     const { error } = await supabase.from("proposal_comments").delete().eq("id", commentId);
     if (!error) {
@@ -480,6 +499,7 @@ export default function ProposalsPage() {
         ) : (
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
+            const isVoted = votedIds.includes(item.id);
 
             return (
               <div
@@ -520,12 +540,20 @@ export default function ProposalsPage() {
                   {item.content}
                 </p>
 
+                {/* 👍 覆議/聯署按鈕 */}
                 <div className="pt-1">
                   <button
                     onClick={() => handleUpvote(item.id)}
-                    className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-full border border-blue-200 transition flex items-center gap-1.5 shadow-sm"
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-full border transition flex items-center gap-1.5 shadow-sm ${
+                      isVoted
+                        ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                        : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                    }`}
                   >
-                    👍 覆議 <span className="bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded-full text-[11px]">{upvotesMap[item.id] || 0}</span>
+                    👍 {isVoted ? "已聯署 (點擊取消)" : "覆議/聯署"}{" "}
+                    <span className={`px-1.5 py-0.5 rounded-full text-[11px] ${isVoted ? "bg-blue-800 text-white" : "bg-blue-200 text-blue-900"}`}>
+                      {upvotesMap[item.id] || 0}
+                    </span>
                   </button>
                 </div>
 

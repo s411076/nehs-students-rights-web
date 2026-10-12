@@ -7,60 +7,88 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function ProfilePage() {
-  const [user, setUser] = useState<any>(null);
+  const [userEmail, setUserEmail] = useState<string>("未提供");
+  const [username, setUsername] = useState<string>("已登入學生");
   const [myProposals, setMyProposals] = useState<any[]>([]);
 
-  const fetchMyProposals = async (userName: string) => {
-    if (!userName) return;
-
+  // 多重比對條件：真實姓名、用戶名、完整 Email 或 Email 前綴
+  const fetchMyProposals = async (email: string, realName: string) => {
     const { data } = await supabase
       .from("proposals")
       .select("*")
-      .eq("author_name", userName)
       .order("created_at", { ascending: false });
 
-    if (data) setMyProposals(data);
+    if (data) {
+      const prefix = email.includes("@") ? email.split("@")[0].toLowerCase() : email.toLowerCase();
+      const fullEmail = email.toLowerCase();
+      const lowerRealName = (realName || "").toLowerCase();
+
+      const matched = data.filter((item) => {
+        const author = (item.author_name || "").toLowerCase();
+        if (!author && !prefix && !fullEmail) return false;
+
+        return (
+          (lowerRealName && author.includes(lowerRealName)) ||
+          (prefix && author.includes(prefix)) ||
+          (fullEmail && author.includes(fullEmail)) ||
+          author === lowerRealName ||
+          author === prefix
+        );
+      });
+      setMyProposals(matched);
+    }
   };
 
   const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      const name =
-        session.user.user_metadata?.full_name ||
-        session.user.user_metadata?.name ||
-        session.user.email?.split("@")[0] ||
-        "已登入學生";
+    try {
+      let foundEmail = "";
+      let foundRealName = "";
 
-      setUser({ ...session.user, displayName: name });
-      fetchMyProposals(name);
-      return;
-    }
+      // 1. Supabase Session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        foundEmail = session.user.email || "";
+        foundRealName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "";
+      } else {
+        // 2. LocalStorage 掃描備份
+        if (typeof window !== "undefined" && localStorage.length > 0) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const rawKey = localStorage.key(i) || "";
+            const val = localStorage.getItem(rawKey) || "";
+            if (!val || val === "false" || val === "null" || val === "undefined") continue;
 
-    if (typeof window !== "undefined" && localStorage.length > 0) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const rawKey = localStorage.key(i) || "";
-        const val = localStorage.getItem(rawKey) || "";
-        if (!val || val === "false" || val === "null" || val === "undefined") continue;
-
-        const k = rawKey.toLowerCase();
-        if (k.includes("sb") || k.includes("user") || k.includes("auth")) {
-          let parsedObj: any = null;
-          try {
-            parsedObj = JSON.parse(val);
-          } catch (e) {}
-
-          const foundUser = parsedObj?.user || (parsedObj?.email ? parsedObj : null);
-          const name =
-            foundUser?.user_metadata?.full_name ||
-            foundUser?.user_metadata?.name ||
-            foundUser?.email?.split("@")[0] ||
-            "已登入學生";
-
-          setUser({ email: foundUser?.email || "已登入學生", displayName: name });
-          fetchMyProposals(name);
-          return;
+            const k = rawKey.toLowerCase();
+            if (
+              k.includes("sb") ||
+              k.includes("user") ||
+              k.includes("auth") ||
+              k.includes("login") ||
+              k.includes("logged")
+            ) {
+              try {
+                const parsed = JSON.parse(val);
+                const targetUser = parsed?.user || (parsed?.email ? parsed : null);
+                foundEmail = targetUser?.email || parsed?.email || "";
+                foundRealName = targetUser?.user_metadata?.full_name || targetUser?.user_metadata?.name || "";
+                if (foundEmail) break;
+              } catch (e) {}
+            }
+          }
         }
       }
+
+      if (foundEmail) {
+        setUserEmail(foundEmail);
+        const namePrefix = foundEmail.includes("@") ? foundEmail.split("@")[0] : foundEmail;
+        const displayName = foundRealName || namePrefix || "已登入學生";
+        setUsername(displayName);
+        fetchMyProposals(foundEmail, displayName);
+      } else {
+        setUserEmail("未提供");
+        setUsername("已登入學生");
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -76,8 +104,8 @@ export default function ProfilePage() {
           👤 個人帳號資訊
         </h1>
         <div className="text-sm text-gray-700 space-y-1">
-          <p><span className="font-semibold">名稱：</span>{user?.displayName || "已登入學生"}</p>
-          <p><span className="font-semibold">電子郵件：</span>{user?.email || "未提供"}</p>
+          <p><span className="font-semibold">名稱：</span>{username}</p>
+          <p><span className="font-semibold">電子郵件：</span>{userEmail}</p>
         </div>
       </div>
 

@@ -13,6 +13,23 @@ const checkIsAdmin = (email?: string) => {
   return ADMIN_EMAILS.includes(email.toLowerCase().trim());
 };
 
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
+}
+
 export default function ProposalsPage() {
   const [publicProposals, setPublicProposals] = useState<any[]>([]);
   const [pendingProposals, setPendingProposals] = useState<any[]>([]);
@@ -21,12 +38,10 @@ export default function ProposalsPage() {
   const [category, setCategory] = useState("環境與設備");
   const [loading, setLoading] = useState(false);
 
-  // Auth & Admin State
   const [user, setUser] = useState<any>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Interaction States
   const [statusInputs, setStatusInputs] = useState<{ [key: string]: string }>({});
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
@@ -36,12 +51,30 @@ export default function ProposalsPage() {
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  const getUserDisplayName = (u: any) => {
+    if (!u) return "已登入學生";
+    const realName = u?.user_metadata?.full_name || u?.user_metadata?.name || u?.name;
+    if (realName && realName !== "已登入學生") return realName;
+    const email = u?.email || "";
+    if (email) {
+      return email.split("@")[0];
+    }
+    return "已登入學生";
+  };
+
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("voted_proposals");
-      if (saved) {
+      const savedVoted = localStorage.getItem("voted_proposals");
+      if (savedVoted) {
         try {
-          setVotedIds(JSON.parse(saved));
+          setVotedIds(JSON.parse(savedVoted));
+        } catch (e) {}
+      }
+
+      const savedMap = localStorage.getItem("proposal_upvotes_map");
+      if (savedMap) {
+        try {
+          setUpvotesMap(JSON.parse(savedMap));
         } catch (e) {}
       }
     }
@@ -104,7 +137,7 @@ export default function ProposalsPage() {
 
   const checkAuth = async () => {
     try {
-      let detectedUser = null;
+      let detectedUser: any = null;
       let detectedLoggedIn = false;
       let detectedAdmin = false;
 
@@ -120,47 +153,34 @@ export default function ProposalsPage() {
           detectedLoggedIn = true;
           detectedAdmin = checkIsAdmin(authUser.email);
         } else if (typeof window !== "undefined") {
-          const cookies = document.cookie || "";
-          const hasAuthMarker =
-            cookies.includes("sb-") ||
-            cookies.includes("auth") ||
-            cookies.includes("token") ||
-            cookies.includes("session") ||
-            cookies.includes("logged");
+          for (let i = 0; i < localStorage.length; i++) {
+            const rawKey = localStorage.key(i) || "";
+            const val = localStorage.getItem(rawKey) || "";
+            if (!val) continue;
 
-          let foundEmail = "";
-          let foundUserObj = null;
-
-          if (localStorage.length > 0) {
-            for (let i = 0; i < localStorage.length; i++) {
-              const rawKey = localStorage.key(i) || "";
-              const val = localStorage.getItem(rawKey) || "";
-              if (!val || val === "false" || val === "null" || val === "undefined") continue;
-
-              const k = rawKey.toLowerCase();
-              if (
-                k.includes("sb") ||
-                k.includes("user") ||
-                k.includes("auth") ||
-                k.includes("login") ||
-                k.includes("logged")
-              ) {
-                try {
-                  const parsed = JSON.parse(val);
-                  foundUserObj = parsed?.user || (parsed?.email ? parsed : null);
-                  foundEmail = foundUserObj?.email || parsed?.email || "";
-                } catch (e) {}
-
+            try {
+              const parsed = JSON.parse(val);
+              const candidate = parsed?.user || (parsed?.email ? parsed : null);
+              if (candidate?.email) {
+                detectedUser = candidate;
                 detectedLoggedIn = true;
+                detectedAdmin = checkIsAdmin(candidate.email);
+                break;
+              }
+            } catch (e) {}
+
+            if (val.includes("eyJ")) {
+              const jwtObj = parseJwt(val);
+              if (jwtObj?.email) {
+                detectedUser = {
+                  email: jwtObj.email,
+                  user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name },
+                };
+                detectedLoggedIn = true;
+                detectedAdmin = checkIsAdmin(jwtObj.email);
                 break;
               }
             }
-          }
-
-          if (hasAuthMarker || detectedLoggedIn) {
-            detectedLoggedIn = true;
-            detectedUser = foundUserObj || { name: "已登入學生", email: foundEmail };
-            detectedAdmin = checkIsAdmin(foundEmail);
           }
         }
       }
@@ -194,7 +214,6 @@ export default function ProposalsPage() {
     };
   }, []);
 
-  // 送出提案 (優先使用用戶真實姓名)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
@@ -202,11 +221,7 @@ export default function ProposalsPage() {
 
     const rawTitle = title.trim();
     const finalTitle = rawTitle.startsWith("[") ? rawTitle : `[${category}] ${rawTitle}`;
-
-    const realName = user?.user_metadata?.full_name || user?.user_metadata?.name;
-    const userEmail = user?.email || "";
-    const emailPrefix = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
-    const authorName = realName || emailPrefix || "已登入學生";
+    const authorName = getUserDisplayName(user);
 
     const { error } = await supabase.from("proposals").insert([
       {
@@ -228,7 +243,6 @@ export default function ProposalsPage() {
     }
   };
 
-  // 👍 覆議按鈕（第一次點擊＋1，再次點擊－1 取消聯署）
   const handleUpvote = (id: string) => {
     if (!isLoggedIn) {
       alert("請先登入才能進行覆議！");
@@ -247,14 +261,17 @@ export default function ProposalsPage() {
     }
 
     setVotedIds(updatedVotedIds);
+
+    const newMap = {
+      ...upvotesMap,
+      [id]: Math.max(0, (upvotesMap[id] || 0) + delta),
+    };
+    setUpvotesMap(newMap);
+
     if (typeof window !== "undefined") {
       localStorage.setItem("voted_proposals", JSON.stringify(updatedVotedIds));
+      localStorage.setItem("proposal_upvotes_map", JSON.stringify(newMap));
     }
-
-    setUpvotesMap((prev) => ({
-      ...prev,
-      [id]: Math.max(0, (prev[id] || 0) + delta),
-    }));
   };
 
   const handleSaveControl = async (id: string) => {
@@ -328,10 +345,7 @@ export default function ProposalsPage() {
     if (!commentText.trim()) return;
 
     const isAnon = commentAnon[proposalId] || false;
-    const realName = user?.user_metadata?.full_name || user?.user_metadata?.name;
-    const userEmail = user?.email || "";
-    const emailPrefix = userEmail.includes("@") ? userEmail.split("@")[0] : userEmail;
-    const authorName = isAnon ? "匿名學生" : realName || emailPrefix || "已登入學生";
+    const authorName = isAnon ? "匿名學生" : getUserDisplayName(user);
 
     const { error } = await supabase.from("proposal_comments").insert([
       {
@@ -500,6 +514,7 @@ export default function ProposalsPage() {
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
             const isVoted = votedIds.includes(item.id);
+            const currentCount = upvotesMap[item.id] || 0;
 
             return (
               <div
@@ -540,7 +555,6 @@ export default function ProposalsPage() {
                   {item.content}
                 </p>
 
-                {/* 👍 覆議/聯署按鈕 */}
                 <div className="pt-1">
                   <button
                     onClick={() => handleUpvote(item.id)}
@@ -551,8 +565,12 @@ export default function ProposalsPage() {
                     }`}
                   >
                     👍 {isVoted ? "已聯署 (點擊取消)" : "覆議/聯署"}{" "}
-                    <span className={`px-1.5 py-0.5 rounded-full text-[11px] ${isVoted ? "bg-blue-800 text-white" : "bg-blue-200 text-blue-900"}`}>
-                      {upvotesMap[item.id] || 0}
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[11px] ${
+                        isVoted ? "bg-blue-800 text-white" : "bg-blue-200 text-blue-900"
+                      }`}
+                    >
+                      {currentCount}
                     </span>
                   </button>
                 </div>
@@ -616,13 +634,20 @@ export default function ProposalsPage() {
                   </div>
 
                   {comments.map((c) => (
-                    <div key={c.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-xs space-y-1 relative">
+                    <div
+                      key={c.id}
+                      className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-xs space-y-1 relative"
+                    >
                       <div className="flex items-center justify-between text-gray-500">
                         <span className="font-semibold text-gray-800 flex items-center gap-1">
                           👤 {c.author_name || "學生"}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span>{c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
+                          <span>
+                            {c.created_at
+                              ? new Date(c.created_at).toLocaleString()
+                              : ""}
+                          </span>
                           {isAdmin && (
                             <button
                               onClick={() => handleDeleteComment(c.id, item.id)}
@@ -641,7 +666,9 @@ export default function ProposalsPage() {
                     <div className="space-y-2 pt-2">
                       <textarea
                         value={commentInputs[item.id] || ""}
-                        onChange={(e) => setCommentInputs({ ...commentInputs, [item.id]: e.target.value })}
+                        onChange={(e) =>
+                          setCommentInputs({ ...commentInputs, [item.id]: e.target.value })
+                        }
                         rows={2}
                         placeholder="寫下您的看法與建議..."
                         className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -651,7 +678,9 @@ export default function ProposalsPage() {
                           <input
                             type="checkbox"
                             checked={commentAnon[item.id] || false}
-                            onChange={(e) => setCommentAnon({ ...commentAnon, [item.id]: e.target.checked })}
+                            onChange={(e) =>
+                              setCommentAnon({ ...commentAnon, [item.id]: e.target.checked })
+                            }
                             className="w-3.5 h-3.5 text-blue-600 rounded"
                           />
                           <span>🕵️ 匿名留言 (隱藏姓名)</span>

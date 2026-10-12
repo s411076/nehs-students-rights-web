@@ -34,6 +34,57 @@ export default function ProposalsPage() {
   const [commentsMap, setCommentsMap] = useState<{ [key: string]: any[] }>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  // 🔍 精準檢測 LocalStorage 與 Session 憑證
+  const getAuthFromStorage = () => {
+    if (typeof window === "undefined") return { isLoggedIn: false, isAdmin: false, user: null };
+
+    let foundUser: any = null;
+    let foundEmail = "";
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || "";
+      const val = localStorage.getItem(key) || "";
+      if (!val) continue;
+
+      try {
+        const parsed = JSON.parse(val);
+        const candidateUser = parsed?.user || (parsed?.email ? parsed : null);
+        if (candidateUser && (candidateUser.email || candidateUser.id)) {
+          foundUser = candidateUser;
+          foundEmail = candidateUser.email || "";
+          break;
+        }
+      } catch (e) {}
+    }
+
+    if (foundUser) {
+      const adminFlag = checkIsAdmin(foundEmail);
+      return {
+        isLoggedIn: true,
+        isAdmin: adminFlag,
+        user: foundUser,
+      };
+    }
+
+    const cookies = document.cookie || "";
+    const hasAuthMarker =
+      cookies.includes("sb-") ||
+      cookies.includes("auth") ||
+      cookies.includes("token") ||
+      cookies.includes("session") ||
+      cookies.includes("logged");
+
+    if (hasAuthMarker) {
+      return {
+        isLoggedIn: true,
+        isAdmin: false,
+        user: { name: "已登入學生" },
+      };
+    }
+
+    return { isLoggedIn: false, isAdmin: false, user: null };
+  };
+
   // 抓取留言
   const fetchComments = async (proposalIds: string[]) => {
     if (!proposalIds.length) return;
@@ -93,89 +144,48 @@ export default function ProposalsPage() {
     }
   };
 
-  // 🔍 廣域萬用登入與權限判定
+  // 🔍 嚴謹的權限驗證邏輯
   const checkAuth = async () => {
     try {
-      let detectedUser = null;
-      let detectedLoggedIn = false;
-      let detectedAdmin = false;
-
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        detectedUser = session.user;
-        detectedLoggedIn = true;
-        detectedAdmin = checkIsAdmin(session.user.email);
-      } else {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          detectedUser = authUser;
-          detectedLoggedIn = true;
-          detectedAdmin = checkIsAdmin(authUser.email);
-        } else if (typeof window !== "undefined") {
-          const cookies = document.cookie || "";
-          const hasAuthCookie =
-            cookies.includes("sb-") ||
-            cookies.includes("auth") ||
-            cookies.includes("token") ||
-            cookies.includes("session") ||
-            cookies.includes("logged") ||
-            cookies.includes("user");
-
-          let foundEmail = "";
-          let foundUserObj = null;
-
-          if (localStorage.length > 0) {
-            for (let i = 0; i < localStorage.length; i++) {
-              const rawKey = localStorage.key(i) || "";
-              const val = localStorage.getItem(rawKey) || "";
-              if (!val || val === "false" || val === "null" || val === "undefined") continue;
-
-              const k = rawKey.toLowerCase();
-              if (
-                k.includes("sb") ||
-                k.includes("user") ||
-                k.includes("auth") ||
-                k.includes("login") ||
-                k.includes("logged") ||
-                k.includes("token") ||
-                k.includes("session")
-              ) {
-                try {
-                  const parsed = JSON.parse(val);
-                  foundUserObj = parsed?.user || (parsed?.email ? parsed : null);
-                  foundEmail = foundUserObj?.email || parsed?.email || "";
-                } catch (e) {}
-
-                detectedLoggedIn = true;
-                break;
-              }
-            }
-          }
-
-          if (hasAuthCookie || detectedLoggedIn) {
-            detectedLoggedIn = true;
-            detectedUser = foundUserObj || { name: "已登入學生", email: foundEmail };
-            detectedAdmin = checkIsAdmin(foundEmail);
-          }
-        }
+        const email = session.user.email || "";
+        const adminFlag = checkIsAdmin(email);
+        setIsLoggedIn(true);
+        setUser(session.user);
+        setIsAdmin(adminFlag);
+        fetchProposals(adminFlag);
+        return;
       }
 
-      setIsLoggedIn(detectedLoggedIn);
-      setIsAdmin(detectedAdmin);
-      setUser(detectedUser);
-      fetchProposals(detectedAdmin);
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        const email = authUser.email || "";
+        const adminFlag = checkIsAdmin(email);
+        setIsLoggedIn(true);
+        setUser(authUser);
+        setIsAdmin(adminFlag);
+        fetchProposals(adminFlag);
+        return;
+      }
+
+      const storageAuth = getAuthFromStorage();
+      setIsLoggedIn(storageAuth.isLoggedIn);
+      setIsAdmin(storageAuth.isAdmin);
+      setUser(storageAuth.user);
+      fetchProposals(storageAuth.isAdmin);
     } catch (e) {
       console.error(e);
-      fetchProposals(false);
+      const storageAuth = getAuthFromStorage();
+      setIsLoggedIn(storageAuth.isLoggedIn);
+      setIsAdmin(storageAuth.isAdmin);
+      setUser(storageAuth.user);
+      fetchProposals(storageAuth.isAdmin);
     }
   };
 
   useEffect(() => {
     checkAuth();
-
-    const timer = setTimeout(() => {
-      checkAuth();
-    }, 500);
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
@@ -190,12 +200,11 @@ export default function ProposalsPage() {
     });
 
     return () => {
-      clearTimeout(timer);
       authListener.subscription.unsubscribe();
     };
   }, []);
 
-  // 送出提案 (自動將分類納入標題，避免資料庫欄位缺失錯誤)
+  // 送出提案
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
@@ -244,7 +253,9 @@ export default function ProposalsPage() {
       .update({ upvotes: newVotes })
       .eq("id", id);
 
-    if (!error) {
+    if (error) {
+      alert("覆議失敗：" + error.message);
+    } else {
       fetchProposals(isAdmin);
     }
   };

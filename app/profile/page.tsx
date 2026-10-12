@@ -11,78 +11,101 @@ export default function ProfilePage() {
   const [username, setUsername] = useState<string>("已登入學生");
   const [myProposals, setMyProposals] = useState<any[]>([]);
 
-  // 多重比對條件：真實姓名、用戶名、完整 Email 或 Email 前綴
+  // 搜尋並連動該帳號發表過的所有提案
   const fetchMyProposals = async (email: string, realName: string) => {
-    const { data } = await supabase
-      .from("proposals")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const { data } = await supabase
+        .from("proposals")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-    if (data) {
-      const prefix = email.includes("@") ? email.split("@")[0].toLowerCase() : email.toLowerCase();
-      const fullEmail = email.toLowerCase();
-      const lowerRealName = (realName || "").toLowerCase();
+      if (data) {
+        const fullEmail = (email || "").toLowerCase().trim();
+        const prefix = fullEmail.includes("@") ? fullEmail.split("@")[0] : fullEmail;
+        const lowerName = (realName || "").toLowerCase().trim();
 
-      const matched = data.filter((item) => {
-        const author = (item.author_name || "").toLowerCase();
-        if (!author && !prefix && !fullEmail) return false;
+        const matched = data.filter((item) => {
+          const author = (item.author_name || "").toLowerCase().trim();
+          const authorEmail = (item.author_email || "").toLowerCase().trim();
 
-        return (
-          (lowerRealName && author.includes(lowerRealName)) ||
-          (prefix && author.includes(prefix)) ||
-          (fullEmail && author.includes(fullEmail)) ||
-          author === lowerRealName ||
-          author === prefix
-        );
-      });
-      setMyProposals(matched);
+          if (!author && !authorEmail) return false;
+
+          return (
+            (fullEmail && authorEmail === fullEmail) ||
+            (fullEmail && author.includes(fullEmail)) ||
+            (prefix && author.includes(prefix)) ||
+            (lowerName && author.includes(lowerName))
+          );
+        });
+
+        setMyProposals(matched);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
+  // 🔍 完整登入狀態偵測邏輯
   const checkAuth = async () => {
     try {
       let foundEmail = "";
       let foundRealName = "";
 
-      // 1. Supabase Session
+      // 1. 檢查 Supabase Session
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         foundEmail = session.user.email || "";
-        foundRealName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "";
-      } else {
-        // 2. LocalStorage 掃描備份
-        if (typeof window !== "undefined" && localStorage.length > 0) {
-          for (let i = 0; i < localStorage.length; i++) {
-            const rawKey = localStorage.key(i) || "";
-            const val = localStorage.getItem(rawKey) || "";
-            if (!val || val === "false" || val === "null" || val === "undefined") continue;
+        foundRealName =
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          "";
+      }
 
-            const k = rawKey.toLowerCase();
-            if (
-              k.includes("sb") ||
-              k.includes("user") ||
-              k.includes("auth") ||
-              k.includes("login") ||
-              k.includes("logged")
-            ) {
-              try {
-                const parsed = JSON.parse(val);
-                const targetUser = parsed?.user || (parsed?.email ? parsed : null);
-                foundEmail = targetUser?.email || parsed?.email || "";
-                foundRealName = targetUser?.user_metadata?.full_name || targetUser?.user_metadata?.name || "";
-                if (foundEmail) break;
-              } catch (e) {}
+      // 2. 檢查 Supabase User
+      if (!foundEmail) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          foundEmail = authUser.email || "";
+          foundRealName =
+            authUser.user_metadata?.full_name ||
+            authUser.user_metadata?.name ||
+            "";
+        }
+      }
+
+      // 3. 掃描 LocalStorage 備份登入資料
+      if (!foundEmail && typeof window !== "undefined" && localStorage.length > 0) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const rawKey = localStorage.key(i) || "";
+          const val = localStorage.getItem(rawKey) || "";
+          if (!val || val === "false" || val === "null" || val === "undefined") continue;
+
+          try {
+            const parsed = JSON.parse(val);
+            const targetUser =
+              parsed?.user ||
+              parsed?.currentSession?.user ||
+              (parsed?.email ? parsed : null);
+
+            if (targetUser?.email) {
+              foundEmail = targetUser.email;
+              foundRealName =
+                targetUser?.user_metadata?.full_name ||
+                targetUser?.user_metadata?.name ||
+                "";
+              break;
             }
-          }
+          } catch (e) {}
         }
       }
 
       if (foundEmail) {
         setUserEmail(foundEmail);
-        const namePrefix = foundEmail.includes("@") ? foundEmail.split("@")[0] : foundEmail;
-        const displayName = foundRealName || namePrefix || "已登入學生";
+        const prefix = foundEmail.includes("@") ? foundEmail.split("@")[0] : foundEmail;
+        const displayName = foundRealName || prefix || "已登入學生";
         setUsername(displayName);
-        fetchMyProposals(foundEmail, displayName);
+
+        fetchMyProposals(foundEmail, foundRealName || prefix);
       } else {
         setUserEmail("未提供");
         setUsername("已登入學生");
@@ -94,6 +117,34 @@ export default function ProfilePage() {
 
   useEffect(() => {
     checkAuth();
+
+    // 延遲二次驗證，避免 client 端初始化時間差
+    const timer = setTimeout(() => {
+      checkAuth();
+    }, 600);
+
+    // 監聽 Supabase 登入狀態變更
+    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      if (session?.user) {
+        const email = session.user.email || "";
+        const name =
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          "";
+        setUserEmail(email);
+        const prefix = email.includes("@") ? email.split("@")[0] : email;
+        const displayName = name || prefix || "已登入學生";
+        setUsername(displayName);
+        fetchMyProposals(email, name || prefix);
+      } else {
+        checkAuth();
+      }
+    });
+
+    return () => {
+      clearTimeout(timer);
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   return (

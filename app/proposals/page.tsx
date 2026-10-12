@@ -275,7 +275,7 @@ export default function ProposalsPage() {
     }
   };
 
-  // 👍 跨使用者全站資料庫累加聯署數機制
+  // 👍 強制狀態鎖定連署機制
   const handleUpvote = async (id: string) => {
     if (!isLoggedIn) {
       alert("請先登入才能進行覆議！");
@@ -283,13 +283,24 @@ export default function ProposalsPage() {
     }
 
     const isCurrentlyVoted = votedIds.includes(id);
-    const currentCount = upvotesMap[id] || 0;
-    const newCount = isCurrentlyVoted ? Math.max(0, currentCount - 1) : currentCount + 1;
+    const item = publicProposals.find((p) => p.id === id);
+    const dbCount = item?.upvotes_count || 0;
+    const stateCount = upvotesMap[id];
+    const baseCount = stateCount !== undefined ? stateCount : dbCount;
 
-    // 1. 立即更新前端畫面 UI 與個人點擊狀態
-    const updatedVotedIds = isCurrentlyVoted
-      ? votedIds.filter((vId) => vId !== id)
-      : [...votedIds, id];
+    let updatedVotedIds: string[];
+    let newCount = 0;
+
+    if (isCurrentlyVoted) {
+      // 取消連署
+      updatedVotedIds = votedIds.filter((vId) => vId !== id);
+      const currentEffective = Math.max(1, baseCount);
+      newCount = Math.max(0, currentEffective - 1);
+    } else {
+      // 新增連署
+      updatedVotedIds = [...votedIds, id];
+      newCount = baseCount + 1;
+    }
 
     setVotedIds(updatedVotedIds);
     setUpvotesMap((prev) => ({ ...prev, [id]: newCount }));
@@ -298,7 +309,7 @@ export default function ProposalsPage() {
       localStorage.setItem("voted_proposals", JSON.stringify(updatedVotedIds));
     }
 
-    // 2. 將新總數寫入 Supabase 資料庫，所有使用者同步累加
+    // 寫入 Supabase 資料庫
     const { error } = await supabase
       .from("proposals")
       .update({ upvotes_count: newCount })
@@ -549,7 +560,10 @@ export default function ProposalsPage() {
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
             const isVoted = votedIds.includes(item.id);
-            const currentCount = upvotesMap[item.id] !== undefined ? upvotesMap[item.id] : (item.upvotes_count || 0);
+            const dbCount = item.upvotes_count || 0;
+            const stateCount = upvotesMap[item.id];
+            const rawCount = stateCount !== undefined ? stateCount : dbCount;
+            const currentCount = isVoted ? Math.max(1, rawCount) : rawCount;
 
             return (
               <div

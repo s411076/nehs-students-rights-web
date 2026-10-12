@@ -6,12 +6,30 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// 萬用 JWT Token 解碼器
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
+}
+
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string>("未提供");
   const [username, setUsername] = useState<string>("已登入學生");
   const [myProposals, setMyProposals] = useState<any[]>([]);
 
-  // 搜尋並連動該帳號發表過的所有提案
+  // 搜尋並比對該帳號發表過的所有提案
   const fetchMyProposals = async (email: string, realName: string) => {
     try {
       const { data } = await supabase
@@ -34,7 +52,9 @@ export default function ProfilePage() {
             (fullEmail && authorEmail === fullEmail) ||
             (fullEmail && author.includes(fullEmail)) ||
             (prefix && author.includes(prefix)) ||
-            (lowerName && author.includes(lowerName))
+            (lowerName && author.includes(lowerName)) ||
+            (author && lowerName && lowerName.includes(author)) ||
+            (author && prefix && prefix.includes(author))
           );
         });
 
@@ -45,13 +65,13 @@ export default function ProfilePage() {
     }
   };
 
-  // 🔍 完整登入狀態偵測邏輯
+  // 🔍 深度萬用登入檢測
   const checkAuth = async () => {
-    try {
-      let foundEmail = "";
-      let foundRealName = "";
+    let foundEmail = "";
+    let foundRealName = "";
 
-      // 1. 檢查 Supabase Session
+    try {
+      // 1. Supabase Session API
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         foundEmail = session.user.email || "";
@@ -61,7 +81,7 @@ export default function ProfilePage() {
           "";
       }
 
-      // 2. 檢查 Supabase User
+      // 2. Supabase User API
       if (!foundEmail) {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
@@ -73,12 +93,12 @@ export default function ProfilePage() {
         }
       }
 
-      // 3. 掃描 LocalStorage 備份登入資料
-      if (!foundEmail && typeof window !== "undefined" && localStorage.length > 0) {
+      // 3. 掃描 LocalStorage (含 JWT 解碼)
+      if (!foundEmail && typeof window !== "undefined") {
         for (let i = 0; i < localStorage.length; i++) {
           const rawKey = localStorage.key(i) || "";
           const val = localStorage.getItem(rawKey) || "";
-          if (!val || val === "false" || val === "null" || val === "undefined") continue;
+          if (!val) continue;
 
           try {
             const parsed = JSON.parse(val);
@@ -96,6 +116,37 @@ export default function ProfilePage() {
               break;
             }
           } catch (e) {}
+
+          if (val.includes("eyJ")) {
+            const jwtObj = parseJwt(val);
+            if (jwtObj?.email) {
+              foundEmail = jwtObj.email;
+              foundRealName =
+                jwtObj?.user_metadata?.full_name ||
+                jwtObj?.user_metadata?.name ||
+                "";
+              break;
+            }
+          }
+        }
+      }
+
+      // 4. 掃描 Cookie JWT Token
+      if (!foundEmail && typeof window !== "undefined") {
+        const cookies = document.cookie.split(";");
+        for (const cookie of cookies) {
+          const val = cookie.trim().split("=")[1] || "";
+          if (val.includes("eyJ")) {
+            const jwtObj = parseJwt(val);
+            if (jwtObj?.email) {
+              foundEmail = jwtObj.email;
+              foundRealName =
+                jwtObj?.user_metadata?.full_name ||
+                jwtObj?.user_metadata?.name ||
+                "";
+              break;
+            }
+          }
         }
       }
 
@@ -104,7 +155,6 @@ export default function ProfilePage() {
         const prefix = foundEmail.includes("@") ? foundEmail.split("@")[0] : foundEmail;
         const displayName = foundRealName || prefix || "已登入學生";
         setUsername(displayName);
-
         fetchMyProposals(foundEmail, foundRealName || prefix);
       } else {
         setUserEmail("未提供");
@@ -118,12 +168,10 @@ export default function ProfilePage() {
   useEffect(() => {
     checkAuth();
 
-    // 延遲二次驗證，避免 client 端初始化時間差
     const timer = setTimeout(() => {
       checkAuth();
-    }, 600);
+    }, 500);
 
-    // 監聽 Supabase 登入狀態變更
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
         const email = session.user.email || "";
@@ -160,7 +208,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* 我發表的提案 */}
+      {/* 我發表的提案 (完整連動) */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
           📝 我發表的提案 ({myProposals.length})

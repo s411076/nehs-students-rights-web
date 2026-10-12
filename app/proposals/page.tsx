@@ -52,14 +52,14 @@ export default function ProposalsPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const getUserDisplayName = (u: any) => {
-    if (!u) return "已登入學生";
+    if (!u) return "學生";
     const realName = u?.user_metadata?.full_name || u?.user_metadata?.name || u?.name;
     if (realName && realName !== "已登入學生") return realName;
     const email = u?.email || "";
     if (email) {
       return email.split("@")[0];
     }
-    return "已登入學生";
+    return "學生";
   };
 
   useEffect(() => {
@@ -68,13 +68,6 @@ export default function ProposalsPage() {
       if (savedVoted) {
         try {
           setVotedIds(JSON.parse(savedVoted));
-        } catch (e) {}
-      }
-
-      const savedMap = localStorage.getItem("proposal_upvotes_map");
-      if (savedMap) {
-        try {
-          setUpvotesMap(JSON.parse(savedMap));
         } catch (e) {}
       }
     }
@@ -114,13 +107,18 @@ export default function ProposalsPage() {
       setPublicProposals(publicData);
       const initialStatuses: { [key: string]: string } = {};
       const initialReplies: { [key: string]: string } = {};
+      const initialUpvotes: { [key: string]: number } = {};
+
       const pIds = publicData.map((item) => {
         initialStatuses[item.id] = item.status || "研議中";
         initialReplies[item.id] = item.reply || "";
+        initialUpvotes[item.id] = item.upvotes_count || 0;
         return item.id;
       });
+
       setStatusInputs(initialStatuses);
       setReplyInputs(initialReplies);
+      setUpvotesMap(initialUpvotes);
       fetchComments(pIds);
     }
 
@@ -160,7 +158,7 @@ export default function ProposalsPage() {
 
             try {
               const parsed = JSON.parse(val);
-              const candidate = parsed?.user || (parsed?.email ? parsed : null);
+              const candidate = parsed?.user || parsed?.currentSession?.user || (parsed?.email ? parsed : null);
               if (candidate?.email) {
                 detectedUser = candidate;
                 detectedLoggedIn = true;
@@ -174,11 +172,39 @@ export default function ProposalsPage() {
               if (jwtObj?.email) {
                 detectedUser = {
                   email: jwtObj.email,
-                  user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name },
+                  user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name || jwtObj.full_name },
                 };
                 detectedLoggedIn = true;
                 detectedAdmin = checkIsAdmin(jwtObj.email);
                 break;
+              }
+            }
+          }
+
+          if (!detectedLoggedIn) {
+            const cookies = document.cookie || "";
+            if (
+              cookies.includes("sb-") ||
+              cookies.includes("auth") ||
+              cookies.includes("token") ||
+              cookies.includes("session") ||
+              cookies.includes("logged")
+            ) {
+              detectedLoggedIn = true;
+              const cookieArray = cookies.split(";");
+              for (const cookie of cookieArray) {
+                const cVal = cookie.trim().split("=")[1] || "";
+                if (cVal.includes("eyJ")) {
+                  const jwtObj = parseJwt(cVal);
+                  if (jwtObj?.email) {
+                    detectedUser = {
+                      email: jwtObj.email,
+                      user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name || jwtObj.full_name },
+                    };
+                    detectedAdmin = checkIsAdmin(jwtObj.email);
+                    break;
+                  }
+                }
               }
             }
           }
@@ -197,6 +223,9 @@ export default function ProposalsPage() {
 
   useEffect(() => {
     checkAuth();
+    const t1 = setTimeout(checkAuth, 300);
+    const t2 = setTimeout(checkAuth, 1000);
+
     const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
       if (session?.user) {
         const adminFlag = checkIsAdmin(session.user.email);
@@ -210,6 +239,8 @@ export default function ProposalsPage() {
     });
 
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
       authListener.subscription.unsubscribe();
     };
   }, []);
@@ -229,6 +260,7 @@ export default function ProposalsPage() {
         content: content.trim(),
         author_name: authorName,
         status: "待審核",
+        upvotes_count: 0,
       },
     ]);
 
@@ -243,39 +275,37 @@ export default function ProposalsPage() {
     }
   };
 
-  const handleUpvote = (id: string) => {
+  // 👍 跨使用者全站資料庫累加聯署數機制
+  const handleUpvote = async (id: string) => {
     if (!isLoggedIn) {
       alert("請先登入才能進行覆議！");
       return;
     }
 
     const isCurrentlyVoted = votedIds.includes(id);
-    let updatedVotedIds: string[];
-    let newCount = 0;
+    const currentCount = upvotesMap[id] || 0;
+    const newCount = isCurrentlyVoted ? Math.max(0, currentCount - 1) : currentCount + 1;
 
-    if (isCurrentlyVoted) {
-      // 取消聯署
-      updatedVotedIds = votedIds.filter((vId) => vId !== id);
-      const prev = upvotesMap[id] !== undefined ? upvotesMap[id] : 1;
-      newCount = Math.max(0, prev - 1);
-    } else {
-      // 新增覆議
-      updatedVotedIds = [...votedIds, id];
-      const prev = upvotesMap[id] || 0;
-      newCount = prev + 1;
-    }
+    // 1. 立即更新前端畫面 UI 與個人點擊狀態
+    const updatedVotedIds = isCurrentlyVoted
+      ? votedIds.filter((vId) => vId !== id)
+      : [...votedIds, id];
 
     setVotedIds(updatedVotedIds);
-
-    const newMap = {
-      ...upvotesMap,
-      [id]: newCount,
-    };
-    setUpvotesMap(newMap);
+    setUpvotesMap((prev) => ({ ...prev, [id]: newCount }));
 
     if (typeof window !== "undefined") {
       localStorage.setItem("voted_proposals", JSON.stringify(updatedVotedIds));
-      localStorage.setItem("proposal_upvotes_map", JSON.stringify(newMap));
+    }
+
+    // 2. 將新總數寫入 Supabase 資料庫，所有使用者同步累加
+    const { error } = await supabase
+      .from("proposals")
+      .update({ upvotes_count: newCount })
+      .eq("id", id);
+
+    if (error) {
+      console.error("更新資料庫連署數失敗：", error.message);
     }
   };
 
@@ -519,8 +549,7 @@ export default function ProposalsPage() {
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
             const isVoted = votedIds.includes(item.id);
-            const rawCount = upvotesMap[item.id] || 0;
-            const currentCount = isVoted ? Math.max(1, rawCount) : rawCount;
+            const currentCount = upvotesMap[item.id] !== undefined ? upvotesMap[item.id] : (item.upvotes_count || 0);
 
             return (
               <div

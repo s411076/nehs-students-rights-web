@@ -1,109 +1,107 @@
 ﻿"use client";
-import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useAuth } from "@/components/AuthProvider";
+import { createClient } from "@/lib/supabase";
+import { createRightsActionFlight, readRights, sendRightsAction } from "@/lib/rights/client";
+import { RIGHTS_PENDING_PATH, ADMIN_ACTIONS, makeFailure } from "@/lib/rights/contracts";
+import { parseActionRequest } from "@/lib/rights/validation";
+import { PROPOSAL_SELECT_STRING, COMMENT_SELECT_STRING, PUBLIC_STATUSES, toProposalDTO, toCommentDTO, isPublicStatus } from "@/lib/rights/queries";
+import type { ProposalDTO, CommentDTO } from "@/lib/rights/queries";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-const ADMIN_EMAILS = ["s411076@nehs.hc.edu.tw", "s411158@nehs.hc.edu.tw"];
-
-const checkIsAdmin = (email?: string) => {
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
-};
-
-function parseJwt(token: string) {
-  try {
-    const base64Url = token.split(".")[1];
-    if (!base64Url) return null;
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    return null;
-  }
+function parseProposals(data: unknown): ProposalDTO[] {
+  if (!Array.isArray(data)) throw new TypeError("Invalid proposals response");
+  return data.flatMap(row => { const item = toProposalDTO(row); return item ? [item] : []; });
 }
 
 export default function ProposalsPage() {
-  const [publicProposals, setPublicProposals] = useState<any[]>([]);
-  const [pendingProposals, setPendingProposals] = useState<any[]>([]);
+  const [supabase] = useState(createClient);
+  const auth = useAuth();
+  const { isLoggedIn, isAdmin, generation } = auth;
+  const currentAuth = useRef(auth);
+  currentAuth.current = auth;
+  const [publicProposals, setPublicProposals] = useState<ProposalDTO[]>([]);
+  const [pendingProposals, setPendingProposals] = useState<ProposalDTO[]>([]);
+  const [publicListStatus, setPublicListStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [pendingListStatus, setPendingListStatus] = useState<"loading" | "ready" | "error">("loading");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("環境與設備");
-  const [loading, setLoading] = useState(false);
 
-  const [user, setUser] = useState<any>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [pendingAction, setPendingAction] = useState(false);
+  const flight = useRef(false);
+  const mounted = useRef(true);
 
   const [statusInputs, setStatusInputs] = useState<{ [key: string]: string }>({});
   const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [commentAnon, setCommentAnon] = useState<{ [key: string]: boolean }>({});
-  const [commentsMap, setCommentsMap] = useState<{ [key: string]: any[] }>({});
+  const [commentsMap, setCommentsMap] = useState<Record<string, CommentDTO[]>>({});
   const [upvotesMap, setUpvotesMap] = useState<{ [key: string]: number }>({});
   const [votedIds, setVotedIds] = useState<string[]>([]);
-  const [savingId, setSavingId] = useState<string | null>(null);
-
-  const getUserDisplayName = (u: any) => {
-    if (!u) return "學生";
-    const realName = u?.user_metadata?.full_name || u?.user_metadata?.name || u?.name;
-    if (realName && realName !== "已登入學生") return realName;
-    const email = u?.email || "";
-    if (email) {
-      return email.split("@")[0];
-    }
-    return "學生";
-  };
+  const verifiedUserId = auth.status === "verified" ? auth.identity?.id : undefined;
+  const voteFlights = useRef(new Map<string, ReturnType<typeof createRightsActionFlight>>());
+  const committedVotedIds = useRef<string[]>([]);
+  const [pendingVotes, setPendingVotes] = useState<string[]>([]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedVoted = localStorage.getItem("voted_proposals");
-      if (savedVoted) {
-        try {
-          setVotedIds(JSON.parse(savedVoted));
-        } catch (e) {}
+    voteFlights.current.clear();
+    setPendingVotes([]);
+    let ids: string[] = [];
+    if (verifiedUserId) {
+      try {
+        const saved = localStorage.getItem(`voted_proposals:${verifiedUserId}`);
+        const parsed: unknown = saved ? JSON.parse(saved) : [];
+        if (Array.isArray(parsed) && parsed.every((id): id is string => typeof id === "string")) ids = parsed;
+      } catch (error) {
+        console.warn("無法讀取本機連署標記", error);
       }
     }
-  }, []);
+    committedVotedIds.current = ids;
+    setVotedIds(ids);
+  }, [verifiedUserId, generation]);
 
-  const fetchComments = async (proposalIds: string[]) => {
-    if (!proposalIds.length) return;
+  const fetchComments = useCallback(async (proposalIds: string[]) => {
+    if (!proposalIds.length) { setCommentsMap({}); return { ok: true }; }
+    const version = currentAuth.current.generation;
     try {
       const { data, error } = await supabase
         .from("proposal_comments")
-        .select("*")
+        .select(COMMENT_SELECT_STRING)
         .in("proposal_id", proposalIds)
         .order("created_at", { ascending: true });
 
-      if (!error && data) {
-        const grouped: { [key: string]: any[] } = {};
-        data.forEach((c) => {
+      if (error) throw error;
+      if (mounted.current && currentAuth.current.generation === version && data) {
+        const grouped: Record<string, CommentDTO[]> = {};
+        data.forEach((row) => {
+          const c = toCommentDTO(row);
+          if (!c || !proposalIds.includes(c.proposal_id)) return;
           if (!grouped[c.proposal_id]) grouped[c.proposal_id] = [];
           grouped[c.proposal_id].push(c);
         });
         setCommentsMap(grouped);
       }
-    } catch (e) {
-      console.error(e);
+      return { ok: true };
+    } catch {
+      if (mounted.current && currentAuth.current.generation === version) setErrorMessage("留言清單更新失敗，請重新整理。");
+      return makeFailure("UNAVAILABLE");
     }
-  };
+  }, [supabase]);
 
-  const fetchProposals = async (adminFlag: boolean) => {
-    const { data: publicData } = await supabase
+  const fetchProposals = useCallback(async () => {
+    const version = currentAuth.current.generation;
+    setPublicListStatus("loading");
+    try {
+    const { data, error } = await supabase
       .from("proposals")
-      .select("*")
-      .neq("status", "待審核")
-      .neq("status", "被退回")
+      .select(PROPOSAL_SELECT_STRING)
+      .in("status", [...PUBLIC_STATUSES])
       .order("created_at", { ascending: false });
 
-    if (publicData) {
+    if (error) throw error;
+    if (!mounted.current || currentAuth.current.generation !== version) return makeFailure("UNAVAILABLE");
+      const publicData = parseProposals(data).filter(item => isPublicStatus(item.status));
       setPublicProposals(publicData);
       const initialStatuses: { [key: string]: string } = {};
       const initialReplies: { [key: string]: string } = {};
@@ -119,305 +117,223 @@ export default function ProposalsPage() {
       setStatusInputs(initialStatuses);
       setReplyInputs(initialReplies);
       setUpvotesMap(initialUpvotes);
-      fetchComments(pIds);
-    }
-
-    if (adminFlag) {
-      const { data: pendingData } = await supabase
-        .from("proposals")
-        .select("*")
-        .eq("status", "待審核")
-        .order("created_at", { ascending: false });
-
-      if (pendingData) setPendingProposals(pendingData);
-    }
-  };
-
-  const checkAuth = async () => {
-    try {
-      let detectedUser: any = null;
-      let detectedLoggedIn = false;
-      let detectedAdmin = false;
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        detectedUser = session.user;
-        detectedLoggedIn = true;
-        detectedAdmin = checkIsAdmin(session.user.email);
-      } else {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          detectedUser = authUser;
-          detectedLoggedIn = true;
-          detectedAdmin = checkIsAdmin(authUser.email);
-        } else if (typeof window !== "undefined") {
-          for (let i = 0; i < localStorage.length; i++) {
-            const rawKey = localStorage.key(i) || "";
-            const val = localStorage.getItem(rawKey) || "";
-            if (!val) continue;
-
-            try {
-              const parsed = JSON.parse(val);
-              const candidate = parsed?.user || parsed?.currentSession?.user || (parsed?.email ? parsed : null);
-              if (candidate?.email) {
-                detectedUser = candidate;
-                detectedLoggedIn = true;
-                detectedAdmin = checkIsAdmin(candidate.email);
-                break;
-              }
-            } catch (e) {}
-
-            if (val.includes("eyJ")) {
-              const jwtObj = parseJwt(val);
-              if (jwtObj?.email) {
-                detectedUser = {
-                  email: jwtObj.email,
-                  user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name || jwtObj.full_name },
-                };
-                detectedLoggedIn = true;
-                detectedAdmin = checkIsAdmin(jwtObj.email);
-                break;
-              }
-            }
-          }
-
-          if (!detectedLoggedIn) {
-            const cookies = document.cookie || "";
-            if (
-              cookies.includes("sb-") ||
-              cookies.includes("auth") ||
-              cookies.includes("token") ||
-              cookies.includes("session") ||
-              cookies.includes("logged")
-            ) {
-              detectedLoggedIn = true;
-              const cookieArray = cookies.split(";");
-              for (const cookie of cookieArray) {
-                const cVal = cookie.trim().split("=")[1] || "";
-                if (cVal.includes("eyJ")) {
-                  const jwtObj = parseJwt(cVal);
-                  if (jwtObj?.email) {
-                    detectedUser = {
-                      email: jwtObj.email,
-                      user_metadata: jwtObj.user_metadata || { full_name: jwtObj.name || jwtObj.full_name },
-                    };
-                    detectedAdmin = checkIsAdmin(jwtObj.email);
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
+      setPublicListStatus("ready");
+      return await fetchComments(pIds);
+    } catch {
+      if (mounted.current && currentAuth.current.generation === version) {
+        setPublicListStatus("error");
       }
-
-      setIsLoggedIn(detectedLoggedIn);
-      setIsAdmin(detectedAdmin);
-      setUser(detectedUser);
-      fetchProposals(detectedAdmin);
-    } catch (e) {
-      console.error(e);
-      fetchProposals(false);
+      return makeFailure("UNAVAILABLE");
     }
+  }, [supabase, fetchComments]);
+
+  const fetchPending = useCallback(async () => {
+    const version = currentAuth.current.generation;
+    if (!currentAuth.current.isAdmin) return { ok: true };
+    setPendingListStatus("loading");
+    try {
+    const result = await readRights(RIGHTS_PENDING_PATH, parseProposals);
+    if (!mounted.current || currentAuth.current.generation !== version || !currentAuth.current.isAdmin) return result;
+    if (result.ok) {
+      setPendingProposals(result.data.filter(item => item.status === "待審核"));
+      setPendingListStatus("ready");
+    } else setPendingListStatus("error");
+    return result;
+    } catch {
+      if (mounted.current && currentAuth.current.generation === version && currentAuth.current.isAdmin) {
+        setPendingListStatus("error");
+      }
+      return makeFailure("UNAVAILABLE");
+    }
+  }, []);
+
+  const refresh = async () => {
+    const result = await fetchProposals();
+    if (!result.ok) return result;
+    return fetchPending();
   };
 
   useEffect(() => {
-    checkAuth();
-    const t1 = setTimeout(checkAuth, 300);
-    const t2 = setTimeout(checkAuth, 1000);
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      if (session?.user) {
-        const adminFlag = checkIsAdmin(session.user.email);
-        setIsLoggedIn(true);
-        setUser(session.user);
-        setIsAdmin(adminFlag);
-        fetchProposals(adminFlag);
-      } else {
-        checkAuth();
-      }
+    mounted.current = true;
+    const version = generation;
+    void fetchProposals().then(undefined, () => {
+      if (mounted.current && currentAuth.current.generation === version) setPublicListStatus("error");
     });
+    return () => { mounted.current = false; };
+  }, [fetchProposals, generation]);
 
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
+  useEffect(() => {
+    setPendingProposals([]);
+    setPendingListStatus("loading");
+    if (isAdmin) void fetchPending();
+  }, [isAdmin, generation, fetchPending]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
-    setLoading(true);
-
-    const rawTitle = title.trim();
-    const finalTitle = rawTitle.startsWith("[") ? rawTitle : `[${category}] ${rawTitle}`;
-    const authorName = getUserDisplayName(user);
-
-    const { error } = await supabase.from("proposals").insert([
-      {
-        title: finalTitle,
-        content: content.trim(),
-        author_name: authorName,
-        status: "待審核",
-        upvotes_count: 0,
-      },
-    ]);
-
-    setLoading(false);
-    if (error) {
-      alert("提交失敗：" + error.message);
-    } else {
-      setTitle("");
-      setContent("");
-      alert("學權組已收到你的提案！我們正在慎重審核中，您可在「個人資料」查看審核狀態！");
-      fetchProposals(isAdmin);
+  const mutate = async (request: unknown, afterSuccess?: () => void) => {
+    if (flight.current) return;
+    const parsed = parseActionRequest(request);
+    if (!parsed.ok) { setErrorMessage(parsed.message); return; }
+    if (!isLoggedIn || (ADMIN_ACTIONS.some(action => action === parsed.data.action) && !isAdmin)) {
+      setErrorMessage(makeFailure(isLoggedIn ? "FORBIDDEN" : "UNAUTHORIZED").message);
+      return;
+    }
+    flight.current = true;
+    setPendingAction(true);
+    setErrorMessage("");
+    const version = generation;
+    try {
+      const result = await sendRightsAction(parsed.data, refresh);
+      if (!mounted.current || currentAuth.current.generation !== version) return;
+      if (!result.ok) setErrorMessage(result.message);
+      else {
+        afterSuccess?.();
+        if (result.refresh === "failed") setErrorMessage(result.message || "已儲存，但清單更新失敗");
+      }
+    } finally {
+      flight.current = false;
+      if (mounted.current && currentAuth.current.generation === version) {
+        setPendingAction(false);
+      }
     }
   };
 
-  // 👍 強制狀態鎖定連署機制
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await mutate({ action: "createProposal", payload: { title, content, category } }, () => {
+      setTitle("");
+      setContent("");
+      alert("學權組已收到你的提案！提案將由學權組審核，核可後才會公開發布。");
+    });
+  };
+
+  // Local single-flight/cache is only UI recovery: client-total writes still permit
+  // duplicate ballots and lost updates across tabs/users; this is not ballot integrity.
   const handleUpvote = async (id: string) => {
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !verifiedUserId) {
       alert("請先登入才能進行覆議！");
       return;
     }
-
-    const isCurrentlyVoted = votedIds.includes(id);
-    const item = publicProposals.find((p) => p.id === id);
-    const dbCount = item?.upvotes_count || 0;
-    const stateCount = upvotesMap[id];
-    const baseCount = stateCount !== undefined ? stateCount : dbCount;
-
-    let updatedVotedIds: string[];
-    let newCount = 0;
-
-    if (isCurrentlyVoted) {
-      // 取消連署
-      updatedVotedIds = votedIds.filter((vId) => vId !== id);
-      const currentEffective = Math.max(1, baseCount);
-      newCount = Math.max(0, currentEffective - 1);
-    } else {
-      // 新增連署
-      updatedVotedIds = [...votedIds, id];
-      newCount = baseCount + 1;
-    }
-
-    setVotedIds(updatedVotedIds);
-    setUpvotesMap((prev) => ({ ...prev, [id]: newCount }));
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem("voted_proposals", JSON.stringify(updatedVotedIds));
-    }
-
-    // 寫入 Supabase 資料庫
-    const { error } = await supabase
-      .from("proposals")
-      .update({ upvotes_count: newCount })
-      .eq("id", id);
-
-    if (error) {
-      console.error("更新資料庫連署數失敗：", error.message);
+    if (voteFlights.current.has(id)) return;
+    const snapshot = {
+      count: upvotesMap[id] ?? publicProposals.find(p => p.id === id)?.upvotes_count ?? 0,
+      voted: committedVotedIds.current.includes(id),
+    };
+    const count = snapshot.voted ? Math.max(0, snapshot.count - 1) : snapshot.count + 1;
+    const request = parseActionRequest({ action: "setVoteCount", payload: { proposalId: id, count } });
+    if (!request.ok) { setErrorMessage(request.message); return; }
+    const run = createRightsActionFlight();
+    voteFlights.current.set(id, run);
+    setPendingVotes(prev => [...prev, id]);
+    setUpvotesMap(prev => ({ ...prev, [id]: count }));
+    setErrorMessage("");
+    const version = generation;
+    const ownerId = verifiedUserId;
+    const current = () => mounted.current && currentAuth.current.generation === version &&
+      currentAuth.current.status === "verified" && currentAuth.current.identity?.id === ownerId;
+    try {
+      const result = await run(request.data);
+      if (!current()) return;
+      if (!result.ok && result.code !== "OUTCOME_UNKNOWN") {
+        setUpvotesMap(prev => ({ ...prev, [id]: snapshot.count }));
+        setErrorMessage(result.message);
+        return;
+      }
+      const receipt = result.ok ? result.data : null;
+      if (receipt && typeof receipt === "object" && "id" in receipt && receipt.id === id &&
+          "upvotes_count" in receipt && typeof receipt.upvotes_count === "number" &&
+          Number.isSafeInteger(receipt.upvotes_count) && receipt.upvotes_count >= 0) {
+        const confirmedCount = receipt.upvotes_count;
+        setUpvotesMap(prev => ({ ...prev, [id]: confirmedCount }));
+        const ids = snapshot.voted ? committedVotedIds.current.filter(vId => vId !== id) : [...committedVotedIds.current, id];
+        committedVotedIds.current = ids;
+        setVotedIds(ids);
+        try {
+          localStorage.setItem(`voted_proposals:${ownerId}`, JSON.stringify(ids));
+        } catch (error) {
+          console.warn("已儲存連署，但無法寫入本機標記", error);
+        }
+        return;
+      }
+      setUpvotesMap(prev => ({ ...prev, [id]: snapshot.count }));
+      setErrorMessage("無法確認是否已儲存，請先更新清單確認，勿重複提交。");
+      // No public readRights proposal endpoint exists; use the existing public read,
+      // never the admin-only pending endpoint, and never replay the mutation.
+      try {
+        const { data, error } = await supabase.from("proposals").select(PROPOSAL_SELECT_STRING)
+          .in("status", [...PUBLIC_STATUSES]).eq("id", id);
+        if (!current()) return;
+        if (!error && data) {
+          const item = parseProposals(data).find(p => p.id === id && isPublicStatus(p.status));
+          if (item) setUpvotesMap(prev => ({ ...prev, [id]: item.upvotes_count }));
+        }
+      } catch (error) {
+        if (current()) console.warn("無法更新連署票數", error);
+      }
+    } finally {
+      if (current() && voteFlights.current.get(id) === run) {
+        voteFlights.current.delete(id);
+        setPendingVotes(prev => prev.filter(vId => vId !== id));
+      }
     }
   };
 
   const handleSaveControl = async (id: string) => {
-    setSavingId(id);
     const newStatus = statusInputs[id] || "研議中";
     const newReply = replyInputs[id] || "";
-
-    const { error } = await supabase
-      .from("proposals")
-      .update({
-        status: newStatus,
-        reply: newReply,
-      })
-      .eq("id", id);
-
-    setSavingId(null);
-    if (error) {
-      alert("儲存失敗：" + error.message);
-    } else {
-      alert("已成功更新提案狀態與官方回覆！");
-      fetchProposals(true);
-    }
+    if (publicProposals.find(item => item.id === id)?.reply && !newReply.trim() && !window.confirm("確定要清除官方回覆嗎？")) return;
+    await mutate({ action: "updateProposalControl", payload: { id, status: newStatus, reply: newReply } });
   };
 
   const handleDeleteProposal = async (id: string) => {
     const confirmDelete = window.confirm("⚠️ 確定要刪除這條提案嗎？刪除後將無法復原！");
     if (!confirmDelete) return;
 
-    const { error } = await supabase.from("proposals").delete().eq("id", id);
-    if (error) {
-      alert("刪除失敗：" + error.message);
-    } else {
-      alert("提案已成功刪除！");
-      fetchProposals(isAdmin);
-    }
+    await mutate({ action: "deleteProposal", payload: { id } });
   };
 
   const handleApprove = async (id: string) => {
-    const { error } = await supabase
-      .from("proposals")
-      .update({ status: "研議中" })
-      .eq("id", id);
-
-    if (error) {
-      alert("核可失敗：" + error.message);
-    } else {
-      alert("提案已成功核可公開！");
-      fetchProposals(true);
-    }
+    await mutate({ action: "approveProposal", payload: { id } });
   };
 
   const handleReject = async (id: string) => {
     const confirmReject = window.confirm("確定要退回這項提案嗎？");
     if (!confirmReject) return;
 
-    const { error } = await supabase
-      .from("proposals")
-      .update({ status: "被退回" })
-      .eq("id", id);
-
-    if (error) {
-      alert("退回失敗：" + error.message);
-    } else {
-      alert("已退回該提案。");
-      fetchProposals(true);
-    }
+    await mutate({ action: "rejectProposal", payload: { id } });
   };
 
   const handleAddComment = async (proposalId: string) => {
     const commentText = commentInputs[proposalId] || "";
-    if (!commentText.trim()) return;
-
     const isAnon = commentAnon[proposalId] || false;
-    const authorName = isAnon ? "匿名學生" : getUserDisplayName(user);
-
-    const { error } = await supabase.from("proposal_comments").insert([
-      {
-        proposal_id: proposalId,
-        content: commentText.trim(),
-        author_name: authorName,
-      },
-    ]);
-
-    if (error) {
-      alert("留言失敗：" + error.message);
-    } else {
-      setCommentInputs({ ...commentInputs, [proposalId]: "" });
-      fetchComments([proposalId]);
-    }
+    await mutate({ action: "addComment", payload: { proposalId, content: commentText, isAnonymous: isAnon } }, () => {
+      setCommentInputs(prev => ({ ...prev, [proposalId]: "" }));
+    });
   };
 
   const handleDeleteComment = async (commentId: string, proposalId: string) => {
-    const { error } = await supabase.from("proposal_comments").delete().eq("id", commentId);
-    if (!error) {
-      fetchComments([proposalId]);
-    }
+    await mutate({ action: "deleteComment", payload: { id: commentId, proposalId } });
   };
+
+  // React does not await event handlers; this boundary owns unexpected rejections.
+  const runEvent = (operation: () => Promise<unknown>) => {
+    const version = generation;
+    const reportFailure = () => {
+      if (mounted.current && currentAuth.current.generation === version) {
+        setErrorMessage("無法確認是否已儲存，請先更新清單確認，勿重複提交。");
+      }
+    };
+    try { void operation().catch(reportFailure); }
+    catch { reportFailure(); }
+  };
+  const loadErrors = [
+    publicListStatus === "error" ? "提案清單更新失敗，請重試。" : "",
+    isAdmin && pendingListStatus === "error" ? "待審核提案清單更新失敗，請重試。" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
+      {errorMessage && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-700">{errorMessage}</p>}
+      {loadErrors && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-700">{loadErrors}</p>}
+      <fieldset disabled={pendingAction} className="contents">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -441,12 +357,16 @@ export default function ProposalsPage() {
         <div className="bg-amber-50/60 border-2 border-amber-300 rounded-2xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center justify-between border-b border-amber-200 pb-3">
             <h2 className="text-base font-bold text-amber-900 flex items-center gap-2">
-              ⏳ 待審核提案區 ({pendingProposals.length})
+              ⏳ 待審核提案區 {pendingListStatus === "ready" ? `(${pendingProposals.length})` : ""}
             </h2>
             <span className="text-xs text-amber-700 font-medium">僅管理員可見此區塊</span>
           </div>
 
-          {pendingProposals.length === 0 ? (
+          {pendingListStatus === "loading" ? (
+            <p role="status" className="text-xs text-amber-700 text-center py-4">待審核提案載入中…</p>
+          ) : pendingListStatus === "error" ? (
+            <button type="button" onClick={() => runEvent(fetchPending)} className="px-3 py-1.5 bg-white text-amber-900 text-xs font-medium rounded-lg">重試待審核提案</button>
+          ) : pendingProposals.length === 0 ? (
             <p className="text-xs text-amber-700 text-center py-4">目前尚無等待審核的提案。</p>
           ) : (
             pendingProposals.map((item) => (
@@ -465,13 +385,13 @@ export default function ProposalsPage() {
 
                 <div className="flex items-center gap-2 pt-2 border-t border-gray-100 justify-end">
                   <button
-                    onClick={() => handleApprove(item.id)}
+                    onClick={() => runEvent(() => handleApprove(item.id))}
                     className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg transition shadow-sm"
                   >
                     ✅ 核可發布
                   </button>
                   <button
-                    onClick={() => handleReject(item.id)}
+                    onClick={() => runEvent(() => handleReject(item.id))}
                     className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-medium rounded-lg transition"
                   >
                     ❌ 退回提案
@@ -485,7 +405,7 @@ export default function ProposalsPage() {
 
       {isLoggedIn ? (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={e => { e.preventDefault(); runEvent(() => handleSubmit(e)); }} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
@@ -535,10 +455,10 @@ export default function ProposalsPage() {
             <div className="flex items-center justify-end pt-2">
               <button
                 type="submit"
-                disabled={loading}
+                 disabled={pendingAction}
                 className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
               >
-                {loading ? "發送中..." : "送出提案"}
+                 {pendingAction ? "發送中..." : "送出提案"}
               </button>
             </div>
           </form>
@@ -552,7 +472,11 @@ export default function ProposalsPage() {
       <div className="space-y-4">
         <h2 className="text-lg font-bold text-gray-800 px-1">熱門學生提案</h2>
 
-        {publicProposals.length === 0 ? (
+        {publicListStatus === "loading" ? (
+          <p role="status" className="text-gray-500 text-center py-10">公開提案載入中…</p>
+        ) : publicListStatus === "error" ? (
+          <button type="button" onClick={() => runEvent(fetchProposals)} className="px-4 py-2 bg-blue-700 text-white font-medium rounded-xl text-sm">重試公開提案</button>
+        ) : publicProposals.length === 0 ? (
           <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
             目前尚無公開提案。
           </p>
@@ -563,7 +487,7 @@ export default function ProposalsPage() {
             const dbCount = item.upvotes_count || 0;
             const stateCount = upvotesMap[item.id];
             const rawCount = stateCount !== undefined ? stateCount : dbCount;
-            const currentCount = isVoted ? Math.max(1, rawCount) : rawCount;
+            const currentCount = rawCount;
 
             return (
               <div
@@ -584,7 +508,7 @@ export default function ProposalsPage() {
 
                   {isAdmin && (
                     <button
-                      onClick={() => handleDeleteProposal(item.id)}
+                      onClick={() => runEvent(() => handleDeleteProposal(item.id))}
                       className="text-xs px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg border border-red-200 transition flex items-center gap-1"
                     >
                       🗑️ 刪除
@@ -606,7 +530,8 @@ export default function ProposalsPage() {
 
                 <div className="pt-1">
                   <button
-                    onClick={() => handleUpvote(item.id)}
+                    onClick={() => runEvent(() => handleUpvote(item.id))}
+                    disabled={pendingVotes.includes(item.id)}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-full border transition flex items-center gap-1.5 shadow-sm ${
                       isVoted
                         ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
@@ -654,11 +579,11 @@ export default function ProposalsPage() {
                       />
 
                       <button
-                        onClick={() => handleSaveControl(item.id)}
-                        disabled={savingId === item.id}
+                        onClick={() => runEvent(() => handleSaveControl(item.id))}
+                        disabled={pendingAction}
                         className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"
                       >
-                        {savingId === item.id ? "儲存中..." : "💾 儲存修改"}
+                        {pendingAction ? "儲存中..." : "💾 儲存修改"}
                       </button>
                     </div>
                   </div>
@@ -699,7 +624,7 @@ export default function ProposalsPage() {
                           </span>
                           {isAdmin && (
                             <button
-                              onClick={() => handleDeleteComment(c.id, item.id)}
+                              onClick={() => runEvent(() => handleDeleteComment(c.id, item.id))}
                               className="text-red-500 hover:text-red-700 font-bold"
                             >
                               ✕
@@ -735,7 +660,7 @@ export default function ProposalsPage() {
                           <span>🕵️ 匿名留言 (隱藏姓名)</span>
                         </label>
                         <button
-                          onClick={() => handleAddComment(item.id)}
+                          onClick={() => runEvent(() => handleAddComment(item.id))}
                           className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl transition shadow-sm"
                         >
                           送出留言
@@ -749,6 +674,7 @@ export default function ProposalsPage() {
           })
         )}
       </div>
+      </fieldset>
     </main>
   );
 }

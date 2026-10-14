@@ -1,232 +1,224 @@
 ﻿"use client";
-import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
+import { PROPOSAL_CATEGORIES, RIGHTS_FEEDBACK_PATH } from "@/lib/rights/contracts";
+import type { FeedbackPublicDTO } from "@/lib/rights/queries";
+import { createRightsActionFlight, readRights } from "@/lib/rights/client";
+import {
+  validateBody,
+  validateCategory,
+  validateFeedbackTitle,
+  validateId,
+  validateIsAnonymous,
+  validateReply,
+} from "@/lib/rights/validation";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function parseFeedbackList(data: unknown): FeedbackPublicDTO[] {
+  if (!Array.isArray(data)) throw new TypeError("Invalid feedback payload");
+  return data.map((row) => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+      throw new TypeError("Invalid feedback row");
+    }
+    const record = row as Record<string, unknown>;
+    const id = record["id"];
+    const title = record["title"];
+    const content = record["content"];
+    const category = record["category"];
+    const isAnonymous = record["is_anonymous"];
+    const reply = record["reply"];
+    const repliedAt = record["replied_at"];
+    const createdAt = record["created_at"];
+    if (
+      typeof id !== "string" ||
+      typeof title !== "string" ||
+      typeof content !== "string" ||
+      typeof category !== "string" ||
+      typeof isAnonymous !== "boolean" ||
+      typeof reply !== "string" ||
+      (repliedAt !== null && typeof repliedAt !== "string") ||
+      typeof createdAt !== "string"
+    ) {
+      throw new TypeError("Invalid feedback row");
+    }
+    if (isAnonymous) {
+      return {
+        id,
+        title,
+        content,
+        category,
+        is_anonymous: true,
+        reply,
+        replied_at: repliedAt,
+        created_at: createdAt,
+      };
+    }
+    const serverAuthor = record["author_name"];
+    if (typeof serverAuthor !== "string") throw new TypeError("Invalid feedback row");
+    return {
+      id,
+      title,
+      content,
+      category,
+      is_anonymous: false,
+      author_name: serverAuthor,
+      reply,
+      replied_at: repliedAt,
+      created_at: createdAt,
+    };
+  });
+}
 
-// 🔒 指定管理員 Email 白名單
-const ADMIN_EMAILS = ["s411076@nehs.hc.edu.tw", "s411158@nehs.hc.edu.tw"];
-
-const checkIsAdmin = (email?: string) => {
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
-};
+type ListStatus = "loading" | "ready" | "error";
 
 export default function FeedbackPage() {
-  const [feedbackList, setFeedbackList] = useState<any[]>([]);
+  const { isAdmin, isLoggedIn } = useAuth();
+
+  const [feedbackList, setFeedbackList] = useState<FeedbackPublicDTO[]>([]);
+  const [listStatus, setListStatus] = useState<ListStatus>("loading");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [category, setCategory] = useState("其他");
+  const [category, setCategory] = useState<string>("其他");
   const [isAnonymous, setIsAnonymous] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Auth & Admin State
-  const [user, setUser] = useState<any>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  // Reply & Delete State
-  const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
+  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // 取得建言列表
-  const fetchFeedback = async () => {
-    const { data, error } = await supabase
-      .from("feedback")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error && data) {
-      setFeedbackList(data);
-      const initialReplies: { [key: string]: string } = {};
-      data.forEach((item) => {
-        initialReplies[item.id] = item.reply || "";
-      });
-      setReplyInputs(initialReplies);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  const submitFlight = useMemo(() => createRightsActionFlight(), []);
+  const replyFlight = useMemo(() => createRightsActionFlight(), []);
+  const deleteFlight = useMemo(() => createRightsActionFlight(), []);
+
+  const loadFeedback = useCallback(async () => {
+    setListStatus("loading");
+    const result = await readRights(RIGHTS_FEEDBACK_PATH, parseFeedbackList);
+    if (!result.ok) {
+      setListStatus("error");
+      return result;
     }
-  };
-
-  // 🔍 嚴格比對 Email 的登入與管理員驗證
-  const checkAuth = async () => {
-    try {
-      // 1. Supabase Client Session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setIsLoggedIn(true);
-        setUser(session.user);
-        setIsAdmin(checkIsAdmin(session.user.email));
-        return;
-      }
-
-      // 2. Supabase getUser
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        setIsLoggedIn(true);
-        setUser(authUser);
-        setIsAdmin(checkIsAdmin(authUser.email));
-        return;
-      }
-
-      // 3. LocalStorage 備用檢查
-      if (typeof window !== "undefined") {
-        for (let i = 0; i < localStorage.length; i++) {
-          const rawKey = localStorage.key(i) || "";
-          const val = localStorage.getItem(rawKey) || "";
-          if (!val || val === "false" || val === "null" || val === "undefined") continue;
-
-          const k = rawKey.toLowerCase();
-          if (
-            k.includes("sb") ||
-            k.includes("user") ||
-            k.includes("auth") ||
-            k.includes("login") ||
-            k.includes("logged") ||
-            k.includes("token") ||
-            k.includes("session")
-          ) {
-            let parsedObj: any = null;
-            try {
-              parsedObj = JSON.parse(val);
-            } catch (e) {}
-
-            const foundUser = parsedObj?.user || (parsedObj?.email ? parsedObj : null);
-            const foundEmail = foundUser?.email || parsedObj?.email || "";
-
-            setIsLoggedIn(true);
-            setUser(foundUser || { name: "已登入學生", email: foundEmail });
-            setIsAdmin(checkIsAdmin(foundEmail));
-            return;
-          }
-        }
-
-        // 4. Cookie 備用檢查 (無 Email 時預設非管理員)
-        const cookies = document.cookie || "";
-        if (
-          cookies.includes("sb-") ||
-          cookies.includes("auth") ||
-          cookies.includes("token") ||
-          cookies.includes("session") ||
-          cookies.includes("logged") ||
-          cookies.includes("user")
-        ) {
-          setIsLoggedIn(true);
-          setUser({ name: "已登入學生" });
-          setIsAdmin(false);
-          return;
-        }
-      }
-
-      setIsLoggedIn(false);
-      setIsAdmin(false);
-      setUser(null);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  useEffect(() => {
-    fetchFeedback();
-    checkAuth();
-
-    const timer = setTimeout(() => {
-      checkAuth();
-    }, 500);
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-      if (session?.user) {
-        setIsLoggedIn(true);
-        setUser(session.user);
-        setIsAdmin(checkIsAdmin(session.user.email));
-      } else {
-        checkAuth();
-      }
+    setFeedbackList(result.data);
+    const initialReplies: Record<string, string> = {};
+    result.data.forEach((item) => {
+      initialReplies[item.id] = item.reply || "";
     });
-
-    return () => {
-      clearTimeout(timer);
-      authListener.subscription.unsubscribe();
-    };
+    setReplyInputs(initialReplies);
+    setListStatus("ready");
+    return result;
   }, []);
 
-  // 送出建言
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    void loadFeedback();
+  }, [loadFeedback]);
+
+  const clearFeedback = () => {
+    setActionError(null);
+    setActionNotice(null);
+  };
+
+  // 送出建言：作者由伺服器依驗證身分寫入，瀏覽器只送布林匿名旗標。
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim()) return;
-    setLoading(true);
-
-    const finalTitle = title.trim() || (content.length > 15 ? content.slice(0, 15) + "..." : content);
-
-    let authorName = "匿名學生";
-    if (!isAnonymous) {
-      authorName =
-        user?.user_metadata?.full_name ||
-        user?.user_metadata?.name ||
-        user?.user_metadata?.custom_claims?.global_name ||
-        user?.email?.split("@")[0] ||
-        user?.email ||
-        "已登入學生";
+    const titleResult = validateFeedbackTitle(title);
+    const contentResult = validateBody(content);
+    const categoryResult = validateCategory(category);
+    const anonymousResult = validateIsAnonymous(isAnonymous);
+    if (!titleResult.ok || !contentResult.ok || !categoryResult.ok || !anonymousResult.ok) {
+      setActionNotice(null);
+      setActionError("資料格式不正確，請檢查後再試一次。");
+      return;
     }
-
-    const { error } = await supabase.from("feedback").insert([
+    setSubmitting(true);
+    clearFeedback();
+    void submitFlight(
       {
-        title: finalTitle,
-        content: content.trim(),
-        category,
-        is_anonymous: isAnonymous,
-        author_name: authorName,
+        action: "createFeedback",
+        payload: {
+          title: titleResult.data,
+          content: contentResult.data,
+          category: categoryResult.data,
+          isAnonymous: anonymousResult.data,
+        },
       },
-    ]);
-
-    setLoading(false);
-    if (error) {
-      alert("提交失敗：" + error.message);
-    } else {
-      setTitle("");
-      setContent("");
-      alert("建言已成功送出！");
-      fetchFeedback();
-    }
+      loadFeedback,
+    ).then((result) => {
+      setSubmitting(false);
+      if (result.ok && result.refresh === "updated") {
+        setTitle("");
+        setContent("");
+        setActionNotice("建言已成功送出！");
+      } else if (result.ok) {
+        setTitle("");
+        setContent("");
+        setActionNotice("已儲存，但清單更新失敗");
+      } else if (result.code === "OUTCOME_UNKNOWN") {
+        setActionError("無法確認是否已儲存，請先更新清單確認，勿重複提交。");
+      } else {
+        setActionError("提交失敗，請稍後再試一次。");
+      }
+    });
   };
 
-  // 發布 / 儲存官方回覆
-  const handleSaveReply = async (id: string) => {
+  // 發布 / 儲存官方回覆：清空既有回覆前先經管理員確認。
+  const handleSaveReply = (id: string) => {
+    const idResult = validateId(id);
+    const replyResult = validateReply(replyInputs[id] ?? "");
+    if (!idResult.ok || !replyResult.ok) {
+      setActionNotice(null);
+      setActionError("資料格式不正確，請檢查後再試一次。");
+      return;
+    }
+    const current = feedbackList.find((item) => item.id === id);
+    if (replyResult.data === "" && (current?.reply ?? "") !== "") {
+      if (!window.confirm("確定要清除這則官方回覆嗎？清除後將無法復原！")) return;
+    }
     setSavingId(id);
-    const replyText = replyInputs[id] || "";
-
-    const { error } = await supabase
-      .from("feedback")
-      .update({
-        reply: replyText,
-        replied_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    setSavingId(null);
-    if (error) {
-      alert("發布失敗：" + error.message);
-    } else {
-      alert("官方回覆已成功儲存！");
-      fetchFeedback();
-    }
+    clearFeedback();
+    void replyFlight(
+      { action: "saveFeedbackReply", payload: { id: idResult.data, reply: replyResult.data } },
+      loadFeedback,
+    ).then((result) => {
+      setSavingId(null);
+      if (result.ok && result.refresh === "updated") {
+        setActionNotice("官方回覆已成功儲存！");
+      } else if (result.ok) {
+        setActionNotice("已儲存，但清單更新失敗");
+      } else if (result.code === "OUTCOME_UNKNOWN") {
+        setActionError("無法確認是否已儲存，請先更新清單確認，勿重複提交。");
+      } else {
+        setActionError("發布失敗，請稍後再試一次。");
+      }
+    });
   };
 
-  // 刪除建言
-  const handleDeleteFeedback = async (id: string) => {
-    const confirmDelete = window.confirm("⚠️ 確定要刪除這條建言嗎？刪除後將無法復原！");
-    if (!confirmDelete) return;
-
-    setDeletingId(id);
-    const { error } = await supabase.from("feedback").delete().eq("id", id);
-    setDeletingId(null);
-
-    if (error) {
-      alert("刪除失敗：" + error.message);
-    } else {
-      alert("建言已成功刪除！");
-      fetchFeedback();
+  // 刪除建言：僅管理員可見，實際權限由伺服器強制執行。
+  const handleDeleteFeedback = (id: string) => {
+    if (!window.confirm("⚠️ 確定要刪除這條建言嗎？刪除後將無法復原！")) return;
+    const idResult = validateId(id);
+    if (!idResult.ok) {
+      setActionNotice(null);
+      setActionError("資料格式不正確，請檢查後再試一次。");
+      return;
     }
+    setDeletingId(id);
+    clearFeedback();
+    void deleteFlight(
+      { action: "deleteFeedback", payload: { id: idResult.data } },
+      loadFeedback,
+    ).then((result) => {
+      setDeletingId(null);
+      if (result.ok && result.refresh === "updated") {
+        setActionNotice("建言已成功刪除！");
+      } else if (result.ok) {
+        setActionNotice("已儲存，但清單更新失敗");
+      } else if (result.code === "OUTCOME_UNKNOWN") {
+        setActionError("無法確認是否已刪除，請先更新清單確認。");
+      } else {
+        setActionError("刪除失敗，請稍後再試一次。");
+      }
+    });
   };
 
   return (
@@ -251,16 +243,28 @@ export default function FeedbackPage() {
         )}
       </div>
 
+      {actionError && (
+        <p role="alert" className="p-3.5 bg-red-50 rounded-2xl text-center text-sm font-semibold text-red-600 shadow-sm border border-red-200">
+          {actionError}
+        </p>
+      )}
+      {actionNotice && (
+        <p role="status" className="p-3.5 bg-green-50 rounded-2xl text-center text-sm font-semibold text-green-700 shadow-sm border border-green-200">
+          {actionNotice}
+        </p>
+      )}
+
       {/* 發表建言區塊：已登入顯示表單；未登入顯示灰色圓角提示條 */}
       {isLoggedIn ? (
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="feedback-title" className="block text-sm font-semibold text-gray-700 mb-1">
                   建言標題
                 </label>
                 <input
+                  id="feedback-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -270,27 +274,30 @@ export default function FeedbackPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="feedback-category" className="block text-sm font-semibold text-gray-700 mb-1">
                   分類
                 </label>
                 <select
+                  id="feedback-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="環境與設備">環境與設備</option>
-                  <option value="學聯與活動">學聯與活動</option>
-                  <option value="課程與教學">課程與教學</option>
-                  <option value="其他">其他</option>
+                  {PROPOSAL_CATEGORIES.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
+              <label htmlFor="feedback-content" className="block text-sm font-semibold text-gray-700 mb-1">
                 寶貴意見內容
               </label>
               <textarea
+                id="feedback-content"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 rows={4}
@@ -313,10 +320,10 @@ export default function FeedbackPage() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={submitting}
                 className="px-6 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition shadow-sm disabled:opacity-50"
               >
-                {loading ? "發送中..." : "送出建言"}
+                {submitting ? "發送中..." : "送出建言"}
               </button>
             </div>
           </form>
@@ -329,11 +336,28 @@ export default function FeedbackPage() {
 
       {/* 近期建言與官方回應清單 */}
       <div className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-800 px-1">
+        <h2 className="text-lg font-bold text-foreground px-1">
           近期建言與官方回應
         </h2>
 
-        {feedbackList.length === 0 ? (
+        {listStatus === "loading" ? (
+          <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
+            建言載入中…
+          </p>
+        ) : listStatus === "error" ? (
+          <div className="text-center py-10 bg-white rounded-2xl border border-gray-200 space-y-3">
+            <p className="text-gray-500">
+              無法載入建言，請稍後再試。
+            </p>
+            <button
+              type="button"
+              onClick={() => void loadFeedback()}
+              className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-sm font-medium rounded-xl transition shadow-sm"
+            >
+              重新載入
+            </button>
+          </div>
+        ) : feedbackList.length === 0 ? (
           <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
             目前尚無意見回饋。
           </p>
@@ -357,6 +381,7 @@ export default function FeedbackPage() {
 
                 {isAdmin && (
                   <button
+                    type="button"
                     onClick={() => handleDeleteFeedback(item.id)}
                     disabled={deletingId === item.id}
                     className="text-xs px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg border border-red-200 transition disabled:opacity-50 flex items-center gap-1"
@@ -375,7 +400,7 @@ export default function FeedbackPage() {
                 {item.content}
               </p>
               <div className="text-xs text-gray-400">
-                — {item.is_anonymous ? "匿名學生" : item.author_name || "學生"}
+                — {item.is_anonymous ? "匿名學生" : (item.author_name ?? "匿名學生")}
               </div>
 
               {item.reply && (
@@ -412,9 +437,11 @@ export default function FeedbackPage() {
                         })
                       }
                       placeholder="請在此輸入官方回應內容..."
+                      aria-label={`回覆「${item.title || item.content.slice(0, 10)}」`}
                       className="flex-1 p-2.5 border border-purple-300 rounded-xl bg-white text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveReply(item.id)}
                       disabled={savingId === item.id}
                       className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"

@@ -1,22 +1,87 @@
 ﻿'use client'
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import confetti from 'canvas-confetti'
 import { useRouter } from 'next/navigation'
+import { useAuth, useOAuthReturn } from '@/components/AuthProvider'
+import {
+  clearLoginCelebrationFlag,
+  consumeLoginCelebrationFlag,
+  markLoginCelebrationFlag,
+  startGoogleOAuth,
+} from '@/lib/auth/oauth-completion'
+import { RIGHTS_FEEDBACK_PATH, makeFailure, makeSuccess } from '@/lib/rights/contracts'
+import type { RightsResult } from '@/lib/rights/contracts'
+import { createRightsActionFlight, readRights } from '@/lib/rights/client'
+import {
+  HOME_SELECT_STRING,
+  PROPOSAL_SELECT_STRING,
+  applyPublicStatusFilter,
+  isPublicStatus,
+  toFeedbackPublicDTO,
+  toHomeSectionDTO,
+  toProposalDTO,
+} from '@/lib/rights/queries'
+import type { FeedbackPublicDTO, HomeSectionDTO, ProposalDTO } from '@/lib/rights/queries'
+import { validateBody, validateId, validateRawTitle } from '@/lib/rights/validation'
+
+type SourceStatus = 'loading' | 'error' | 'ready'
+
+interface ProposalSource {
+  status: SourceStatus
+  items: ProposalDTO[]
+}
+
+interface FeedbackSource {
+  status: SourceStatus
+  items: FeedbackPublicDTO[]
+}
+
+interface SectionSource {
+  status: SourceStatus
+  items: HomeSectionDTO[]
+}
+
+interface ActionMessage {
+  kind: 'success' | 'error'
+  text: string
+}
+
+/** Fail-closed list parser: any malformed row fails the whole read, never guessed. */
+function parseFeedbackList(data: unknown): FeedbackPublicDTO[] {
+  if (!Array.isArray(data)) throw new TypeError('Invalid feedback payload')
+  return data.map((row) => {
+    const dto = toFeedbackPublicDTO(row)
+    if (dto === null) throw new TypeError('Invalid feedback row')
+    return dto
+  })
+}
 
 export default function HomePage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [sections, setSections] = useState<any[]>([])
-  const [proposals, setProposals] = useState<any[]>([])
-  const [feedbacks, setFeedbacks] = useState<any[]>([])
+  const auth = useAuth()
+  const oauthReturn = useOAuthReturn()
+  const generation = auth.generation
+  const isAdmin = auth.isAdmin
+  const isLoggedIn = auth.isLoggedIn
+  const genRef = useRef(generation)
+  genRef.current = generation
+
+  const [proposals, setProposals] = useState<ProposalSource>({ status: 'loading', items: [] })
+  const [feedbacks, setFeedbacks] = useState<FeedbackSource>({ status: 'loading', items: [] })
+  const [sections, setSections] = useState<SectionSource>({ status: 'loading', items: [] })
+  const [proposalNonce, setProposalNonce] = useState(0)
+  const [feedbackNonce, setFeedbackNonce] = useState(0)
+  const [sectionNonce, setSectionNonce] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
 
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null)
+  const createFlight = useRef(createRightsActionFlight())
+  const deleteFlight = useRef(createRightsActionFlight())
 
   const [posStudent, setPosStudent] = useState({ x: 0, y: 0 })
   const [posAdmin, setPosAdmin] = useState({ x: 0, y: 0 })
@@ -39,78 +104,181 @@ export default function HomePage() {
     confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } })
   }
 
-  const checkUserAndRole = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user && user.email) {
-      setUser(user)
-      const userEmail = user.email.trim().toLowerCase()
-      const { data: adminList } = await supabase.from('admins').select('email')
-      if (adminList) {
-        setIsAdmin(adminList.some((a) => a.email.trim().toLowerCase() === userEmail))
-      }
+  const authStatus = auth.status
 
-      if (sessionStorage.getItem('just_logged_in') === 'true') {
-        triggerConfetti()
-        sessionStorage.removeItem('just_logged_in')
-      }
-    }
-  }
-
-  const loadData = async () => {
-    const { data: secData } = await supabase.from('home_sections').select('*').order('created_at', { ascending: false })
-    if (secData) setSections(secData)
-
-    const { data: propData } = await supabase.from('proposals').select('*').order('created_at', { ascending: false })
-    if (propData) setProposals(propData)
-
-    const { data: fbData } = await supabase.from('feedback').select('*').order('created_at', { ascending: false })
-    if (fbData) setFeedbacks(fbData)
-  }
-
+  const [oauthOutcome, setOauthOutcome] = useState<'failure' | 'ineligible' | null>(null)
   useEffect(() => {
-    checkUserAndRole()
-    loadData()
+    if (typeof window === 'undefined') return
+    let active = true
+    const gen = generation
+    void (async () => {
+      if (!oauthReturn.intended) return
+      const result = await oauthReturn.complete()
+      if (!active || genRef.current !== gen) return
+      if (authStatus === 'loading') return
+      if (result.status === 'success' && isLoggedIn) {
+        setOauthOutcome(null)
+        if (consumeLoginCelebrationFlag()) triggerConfetti()
+        return
+      }
+      setOauthOutcome(result.status === 'ineligible' || authStatus === 'ineligible' ? 'ineligible' : 'failure')
+      clearLoginCelebrationFlag()
+    })().catch(() => {
+      if (!active || genRef.current !== gen) return
+      clearLoginCelebrationFlag()
+      setOauthOutcome('failure')
+    })
+    return () => {
+      active = false
+    }
+  }, [authStatus, isLoggedIn, generation, oauthReturn])
+
+  const loadProposalsNow = useCallback(async (gen: number): Promise<RightsResult<unknown>> => {
+    try {
+      const baseQuery = supabase
+        .from('proposals')
+        .select(PROPOSAL_SELECT_STRING)
+        .order('created_at', { ascending: false })
+      const { data, error } = await (applyPublicStatusFilter(baseQuery) as typeof baseQuery)
+      if (error || !Array.isArray(data)) throw new Error('proposals unavailable')
+      const items = data
+        .map((row) => toProposalDTO(row))
+        .filter((dto): dto is ProposalDTO => dto !== null && isPublicStatus(dto.status))
+      if (genRef.current !== gen) return makeFailure('UNAVAILABLE')
+      setProposals({ status: 'ready', items })
+      return makeSuccess(null)
+    } catch {
+      if (genRef.current !== gen) return makeFailure('UNAVAILABLE')
+      setProposals((previous) => ({ status: 'error', items: previous.items }))
+      return makeFailure('UNAVAILABLE')
+    }
+  }, [supabase])
+
+  const loadFeedbackNow = useCallback(async (gen: number): Promise<RightsResult<unknown>> => {
+    const result = await readRights(RIGHTS_FEEDBACK_PATH, parseFeedbackList)
+    if (genRef.current !== gen) return makeFailure('UNAVAILABLE')
+    if (!result.ok) {
+      setFeedbacks((previous) => ({ status: 'error', items: previous.items }))
+      return result
+    }
+    setFeedbacks({ status: 'ready', items: result.data })
+    return makeSuccess(null)
   }, [])
 
-  const handleLogin = async (role: 'student' | 'admin') => {
-    sessionStorage.setItem('just_logged_in', 'true')
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: { hd: 'nehs.hc.edu.tw' }
-      }
-    })
+  const loadSectionsNow = useCallback(async (gen: number): Promise<RightsResult<unknown>> => {
+    try {
+      const { data, error } = await supabase
+        .from('home_sections')
+        .select(HOME_SELECT_STRING)
+        .order('created_at', { ascending: false })
+      if (error || !Array.isArray(data)) throw new Error('sections unavailable')
+      const items = data
+        .map((row) => toHomeSectionDTO(row))
+        .filter((dto): dto is HomeSectionDTO => dto !== null)
+      if (genRef.current !== gen) return makeFailure('UNAVAILABLE')
+      setSections({ status: 'ready', items })
+      return makeSuccess(null)
+    } catch {
+      if (genRef.current !== gen) return makeFailure('UNAVAILABLE')
+      setSections((previous) => ({ status: 'error', items: previous.items }))
+      return makeFailure('UNAVAILABLE')
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    setProposals((previous) => (previous.status === 'ready' ? previous : { status: 'loading', items: previous.items }))
+    void loadProposalsNow(generation)
+  }, [generation, proposalNonce, loadProposalsNow])
+
+  useEffect(() => {
+    setFeedbacks((previous) => (previous.status === 'ready' ? previous : { status: 'loading', items: previous.items }))
+    void loadFeedbackNow(generation)
+  }, [generation, feedbackNonce, loadFeedbackNow])
+
+  useEffect(() => {
+    setSections((previous) => (previous.status === 'ready' ? previous : { status: 'loading', items: previous.items }))
+    void loadSectionsNow(generation)
+  }, [generation, sectionNonce, loadSectionsNow])
+
+  const handleLogin = async () => {
+    const gen = generation
+    markLoginCelebrationFlag()
+    try {
+      const result = await startGoogleOAuth(supabase, window.location.origin)
+      if (result && typeof result === 'object' && 'error' in result && result.error) throw result.error
+    } catch {
+      clearLoginCelebrationFlag()
+      if (genRef.current === gen) setOauthOutcome('failure')
+    }
   }
 
   const handleAddSection = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newTitle.trim() || !newContent.trim()) return
+    if (submitting) return
+
+    const title = validateRawTitle(newTitle)
+    if (!title.ok) {
+      setActionMessage({ kind: 'error', text: '請輸入有效的標題（1–100 字）。' })
+      return
+    }
+    const body = validateBody(newContent)
+    if (!body.ok) {
+      setActionMessage({ kind: 'error', text: '請輸入有效的內容（1–5000 字）。' })
+      return
+    }
 
     setSubmitting(true)
-    const { error } = await supabase.from('home_sections').insert([{ title: newTitle, content: newContent }])
-
-    if (error) alert('新增失敗：' + error.message)
-    else {
-      alert('首頁欄位發布成功！')
+    try {
+      const gen = genRef.current
+      const result = await createFlight.current(
+        { action: 'createHomeSection', payload: { title: title.data, content: body.data } },
+        () => (genRef.current === gen ? loadSectionsNow(gen) : Promise.resolve(makeSuccess(null))),
+      )
+      if (genRef.current !== gen) return
+      if (!result.ok) {
+        setActionMessage({ kind: 'error', text: result.message })
+        return
+      }
+      if (result.refresh === 'failed') {
+        setActionMessage({ kind: 'error', text: result.message ?? '已儲存，但清單更新失敗' })
+        return
+      }
+      setActionMessage({ kind: 'success', text: '首頁欄位發布成功！' })
       setNewTitle('')
       setNewContent('')
-      loadData()
+    } finally {
+      setSubmitting(false)
     }
-    setSubmitting(false)
   }
 
   const handleDeleteSection = async (id: string) => {
+    const checked = validateId(id)
+    if (!checked.ok) {
+      setActionMessage({ kind: 'error', text: '無效的欄位識別碼，無法刪除。' })
+      return
+    }
     if (!window.confirm('確定要刪除此首頁欄位嗎？')) return
-    const { error } = await supabase.from('home_sections').delete().eq('id', id)
-    if (error) alert('刪除失敗：' + error.message)
-    else loadData()
+    const gen = genRef.current
+    const result = await deleteFlight.current(
+      { action: 'deleteHomeSection', payload: { id: checked.data } },
+      () => (genRef.current === gen ? loadSectionsNow(gen) : Promise.resolve(makeSuccess(null))),
+    )
+    if (genRef.current !== gen) return
+    if (!result.ok) {
+      setActionMessage({ kind: 'error', text: result.message })
+      return
+    }
+    if (result.refresh === 'failed') {
+      setActionMessage({ kind: 'error', text: result.message ?? '已儲存，但清單更新失敗' })
+      return
+    }
+    setActionMessage({ kind: 'success', text: '已刪除首頁欄位。' })
   }
 
-  // 全站搜尋比對（包含提案標題/內容、建言標題/內容/留言）
+  // 全站搜尋比對（僅公開提案標題/內容、公開建言標題/內容）
   const q = searchQuery.trim().toLowerCase()
   const searchResults = q ? [
-    ...proposals
+    ...proposals.items
       .filter(p => p.title?.toLowerCase().includes(q) || p.content?.toLowerCase().includes(q))
       .map(p => ({
         id: p.id,
@@ -119,9 +287,9 @@ export default function HomePage() {
         preview: p.content,
         url: `/proposals#item-${p.id}`,
         badge: '💡 學生提案',
-        status: p.status || '研議中'
+        status: p.status
       })),
-    ...feedbacks
+    ...feedbacks.items
       .filter(f => f.title?.toLowerCase().includes(q) || f.content?.toLowerCase().includes(q))
       .map(f => ({
         id: f.id,
@@ -130,11 +298,11 @@ export default function HomePage() {
         preview: f.content,
         url: `/feedback#item-${f.id}`,
         badge: '💬 建言/留言',
-        status: null
+        status: null as string | null
       }))
   ] : []
 
-  const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0]
+  const userName = auth.user?.displayName || auth.user?.email?.split('@')[0]
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors">
@@ -144,13 +312,21 @@ export default function HomePage() {
           <p className="text-gray-600 dark:text-slate-400 text-sm">維護學生權益・促進校園溝通・即時反映意見</p>
         </div>
 
-        {!user ? (
+        {oauthOutcome && (
+              <p role="alert" className="mb-4 text-sm font-bold text-red-600 dark:text-red-400">
+                {oauthOutcome === 'ineligible'
+                  ? '登入資格不符：請使用已驗證的竹科實中學校帳號。'
+                  : '登入失敗：Google 回傳錯誤或登入未完成，請再試一次。'}
+              </p>
+        )}
+        {!isLoggedIn ? (
           <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-8 rounded-2xl shadow-lg mb-10 text-center relative overflow-hidden">
             <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-slate-200">請選擇身分登入系統（限 @nehs.hc.edu.tw）</h2>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-6 relative min-h-[160px]">
               <button
-                onClick={() => handleLogin('student')}
+                type="button"
+                onClick={() => handleLogin()}
                 style={{ transform: `translate(${posStudent.x}px, ${posStudent.y}px)` }}
                 className="w-full sm:w-auto flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-2xl py-6 px-10 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-150 flex items-center justify-center gap-3 cursor-pointer border-2 border-blue-400"
               >
@@ -159,7 +335,8 @@ export default function HomePage() {
               </button>
 
               <button
-                onClick={() => handleLogin('admin')}
+                type="button"
+                onClick={() => handleLogin()}
                 style={{ transform: `translate(${posAdmin.x}px, ${posAdmin.y}px)` }}
                 className="bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-700 font-bold text-xs py-2.5 px-4 rounded-xl hover:bg-purple-200 transition-all duration-150 cursor-pointer shadow-sm"
               >
@@ -193,10 +370,40 @@ export default function HomePage() {
 
           {searchQuery.trim() && (
             <div className="mt-4 space-y-2">
+              {proposals.status === 'loading' && (
+                <p className="text-xs text-gray-400 py-1">提案搜尋載入中…</p>
+              )}
+              {proposals.status === 'error' && (
+                <div className="flex items-center gap-2 py-1">
+                  <p className="text-xs text-red-600 dark:text-red-400">提案載入失敗，請重試。</p>
+                  <button
+                    type="button"
+                    onClick={() => setProposalNonce((n) => n + 1)}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 underline"
+                  >
+                    重試提案
+                  </button>
+                </div>
+              )}
+              {feedbacks.status === 'loading' && (
+                <p className="text-xs text-gray-400 py-1">建言搜尋載入中…</p>
+              )}
+              {feedbacks.status === 'error' && (
+                <div className="flex items-center gap-2 py-1">
+                  <p className="text-xs text-red-600 dark:text-red-400">建言載入失敗，請重試。</p>
+                  <button
+                    type="button"
+                    onClick={() => setFeedbackNonce((n) => n + 1)}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 underline"
+                  >
+                    重試建言
+                  </button>
+                </div>
+              )}
               <p className="text-xs font-bold text-gray-500 dark:text-slate-400">
                 搜尋結果 ({searchResults.length} 筆)：
               </p>
-              {searchResults.length === 0 ? (
+              {proposals.status === 'ready' && feedbacks.status === 'ready' && searchResults.length === 0 ? (
                 <p className="text-xs text-gray-400 py-2">找不到符合「{searchQuery}」的提案或建言。</p>
               ) : (
                 searchResults.map((res) => (
@@ -218,7 +425,7 @@ export default function HomePage() {
                         {res.preview}
                       </p>
                     </div>
-                    
+
                     <div className="flex items-center gap-2">
                       {res.status && (
                         <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-2.5 py-1 rounded-md">
@@ -262,14 +469,43 @@ export default function HomePage() {
                 {submitting ? '發布中...' : '發布到首頁'}
               </button>
             </form>
+            {actionMessage && (
+              <p
+                role={actionMessage.kind === 'error' ? 'alert' : 'status'}
+                className={actionMessage.kind === 'error'
+                  ? 'mt-3 text-sm text-red-600 dark:text-red-400'
+                  : 'mt-3 text-sm text-green-700 dark:text-green-400'}
+              >
+                {actionMessage.text}
+              </p>
+            )}
           </div>
         )}
 
         <div className="space-y-6">
-          {sections.map((section) => (
+          {sections.status === 'loading' && (
+            <p className="text-sm text-gray-400 py-2">公告載入中…</p>
+          )}
+          {sections.status === 'error' && (
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border dark:border-slate-800 shadow-sm">
+              <p className="text-sm text-red-600 dark:text-red-400 mb-3">公告載入失敗，請重試。</p>
+              <button
+                type="button"
+                onClick={() => setSectionNonce((n) => n + 1)}
+                className="text-sm font-bold text-blue-600 dark:text-blue-400 underline"
+              >
+                重試
+              </button>
+            </div>
+          )}
+          {sections.status === 'ready' && sections.items.length === 0 && (
+            <p className="text-sm text-gray-400 py-2">目前沒有首頁公告。</p>
+          )}
+          {sections.items.map((section) => (
             <div key={section.id} className="bg-white dark:bg-slate-900 p-6 rounded-xl border dark:border-slate-800 shadow-sm relative">
               {isAdmin && (
                 <button
+                  type="button"
                   onClick={() => handleDeleteSection(section.id)}
                   className="absolute top-4 right-4 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded font-bold"
                 >
@@ -285,6 +521,3 @@ export default function HomePage() {
     </div>
   )
 }
-
-
-

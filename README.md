@@ -6,6 +6,8 @@ A campus website for student proposals, petitions, feedback, and announcements, 
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
 [![Node >= 20](https://img.shields.io/badge/Node-%3E%3D20-green)](https://nodejs.org)
 
+Traditional Chinese version: [中文版](./README.zh-TW.md)
+
 ## Contents
 
 - [Installation](#installation)

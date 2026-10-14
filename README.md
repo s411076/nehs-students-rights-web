@@ -1,6 +1,6 @@
-# 新竹高中學生權益網站
+# Hsinchu Senior High School Student Rights Website
 
-學生提案、連署、意見回饋與公告的校內網站，以 Next.js App Router 加 Supabase 打造。
+A campus website for student proposals, petitions, feedback, and announcements, built with Next.js App Router and Supabase.
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
@@ -13,43 +13,43 @@
 - [How It Works](#how-it-works)
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
-- [測試與離線驗證](#測試與離線驗證)
+- [Testing and Offline Verification](#testing-and-offline-verification)
 
 ## Installation
 
-前置需求：
+Prerequisites:
 
-- Node.js 20.9 以上（Next.js 16 需要），npm 隨附即可。
-- 一個 Supabase 專案，提供專案 URL 與 publishable（anon）key。本機開發與測試只用公開 key，從不使用 service-role key。
+- Node.js 20.9 or later (required by Next.js 16); the bundled npm is fine.
+- A Supabase project providing the project URL and publishable (anon) key. Local development and testing use only the public key, never the service-role key.
 
-環境設定：
+Environment setup:
 
-1. 複製相依套件並安裝：`npm ci`。
-2. 在專案根目錄建立 `.env.local`（已在 `.gitignore` 的 `.env*` 規則內，不會進版控），填入以下兩個公開變數：
+1. Install dependencies: `npm ci`.
+2. Create `.env.local` in the project root (already covered by the `.env*` rule in `.gitignore`, so it never enters version control) with the following two public variables:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://你的專案.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=你的假publishable key
 ```
 
-只有這兩個公開變數，沒有其他必填變數。倉庫內沒有 `.env.example`，也不需要建立。任何地方都不要貼上真實 secret，測試用的假 key 已經寫在 `playwright.config.ts` 與 `tests/fixtures/` 裡。
+Only these two public variables, no other required variables. The repo has no `.env.example`, and none needs to be created. Never paste a real secret anywhere; the fake keys for testing already live in `playwright.config.ts` and `tests/fixtures/`.
 
 ## Quick Start
 
-常用指令（以 `package.json` 為準）：
+Common commands (see `package.json`):
 
-| 指令 | 用途 |
+| Command | Purpose |
 | --- | --- |
-| `npm run dev` | 啟動開發伺服器（http://localhost:3000） |
-| `npm run build` | 正式建置（見下方，一定需要離線前綴，不可裸跑） |
-| `npm run start` | 啟動正式伺服器 |
-| `npm run lint` | ESLint 檢查 |
-| `npm run test` | Vitest 全部單元與整合測試 |
-| `npm run test:watch` | Vitest 監看模式 |
-| `npm run test:e2e` | Playwright 端對端測試 |
-| `npm run typecheck` | `tsc --noEmit` 型別檢查 |
+| `npm run dev` | Start the dev server (http://localhost:3000) |
+| `npm run build` | Production build (see below, offline prefix required, never run bare) |
+| `npm run start` | Start the production server |
+| `npm run lint` | ESLint check |
+| `npm run test` | All Vitest unit and integration tests |
+| `npm run test:watch` | Vitest watch mode |
+| `npm run test:e2e` | Playwright end-to-end tests |
+| `npm run typecheck` | `tsc --noEmit` type check |
 
-發布前的驗證順序：
+Verification order before release:
 
 ```bash
 npm ci
@@ -60,71 +60,71 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_pub
 npm run test:e2e
 ```
 
-`build` 不可裸跑：`/auth/callback` 靜態預渲染會觸發 fail-closed 的瀏覽器 factory（缺公開設定即拋錯），裸 `npm run build` 在此失敗是預期行為，不是回歸。上面的前綴把設定釘到無用的 loopback（port 9）並用 `tests/fixtures/google-fonts.cjs` mock Google Fonts，讓 build 全程離線。全是夾具假 key，不含真實 secret。
+`build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix above pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
 
-`lint` 目前回報既有基準（12 errors, 5 warnings in application files, exit 1），要認列它，不要誤標為通過。安全邊界與殘餘風險寫在 `docs/security-source-remediation.md`。
+`lint` currently reports the existing baseline (12 errors, 5 warnings in application files, exit 1); acknowledge it, do not mislabel it as passing. Security boundaries and residual risks are described in `docs/security-source-remediation.md`.
 
 ## How It Works
 
-**伺服器優先驗證身分。**每次請求都用 `getUser()` 向 Auth 伺服器重新驗證，只接受已確認的 `nehs.hc.edu.tw` 完整 domain（`lib/auth/server.ts`）；管理員身分只查自己 email 的精確比對加 `limit(2)`（`lib/auth/server.ts:36`），零筆、重複、格式不符一律拒絕。`proxy.ts` 只做 refresh 傳遞，不做授權快取。
+**Server-first identity verification.** Every request re-verifies with `getUser()` against the Auth server, accepting only confirmed full-domain `nehs.hc.edu.tw` addresses (`lib/auth/server.ts`); admin identity checks only an exact match on your own email plus `limit(2)` (`lib/auth/server.ts:36`), rejecting zero rows, duplicates, and malformed addresses alike. `proxy.ts` only forwards refreshes, with no authorization caching.
 
-**所有寫入走 13 個動作的 POST allowlist。**`POST /api/rights/actions`（`lib/rights/server-actions.ts`）只接受 4 個學生動作（`createProposal`、`createFeedback`、`addComment`、`setVoteCount`）與 9 個管理動作（提案審核、留言刪除、回覆儲存、公告管理等），請求體用 `parseActionRequest` 精確解析，來源 Origin、JSON 媒體型別與 65536 位元組上限都在守衛內。
+**All writes go through a 13-action POST allowlist.** `POST /api/rights/actions` (`lib/rights/server-actions.ts`) accepts only 4 student actions (`createProposal`, `createFeedback`, `addComment`, `setVoteCount`) and 9 admin actions (proposal review, comment deletion, reply saving, announcement management, and more); the request body is parsed strictly with `parseActionRequest`, with the request Origin, JSON media type, and the 65536-byte limit all enforced inside the guards.
 
-**公開讀取只給投影，匿名不給名字。**公開提案與留言用顯式欄位加 `PUBLIC_STATUSES`（研議中、通過、已採納、不採納）過濾（`lib/rights/queries.ts`），公開意見回饋在序列化前整個省略 `author_name`，個人頁完全不查提案（`app/profile/page.tsx`）。各頁面（首頁、提案、意見回饋、`/admin`）都經由這些投影讀取，不再直接掃表。
+**Public reads get projections only; anonymous reads get no names.** Public proposals and comments use explicit fields plus `PUBLIC_STATUSES` (研議中、通過、已採納、不採納) filtering (`lib/rights/queries.ts`), public feedback omits `author_name` entirely before serialization, and the profile page never queries proposals (`app/profile/page.tsx`). Each page (home, proposals, feedback, `/admin`) reads through these projections instead of scanning tables directly.
 
-**投票只鎖當頁當人，不自動重試。**每提案 single-flight（`app/proposals/page.tsx`），失敗回復快照；不確定結果（斷線、逾時）顯示「無法確認是否已儲存，請先更新清單確認，勿重複提交。」且絕不自動重送。OAuth 由瀏覽器 SDK 完成 PKCE 交換後再以 `getUser` 驗證（`lib/auth/oauth-completion.ts`），基礎 headers（`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、嚴格 `Referrer-Policy`、最小 CSP）由 `next.config.ts` 發出。
+**Votes lock only the current page and user, with no automatic retries.** Per-proposal single-flight (`app/proposals/page.tsx`), restoring the snapshot on failure; uncertain outcomes (disconnect, timeout) show「無法確認是否已儲存，請先更新清單確認，勿重複提交。」and are never resent automatically. OAuth completes the PKCE exchange via the browser SDK before verifying with `getUser` (`lib/auth/oauth-completion.ts`); baseline headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, strict `Referrer-Policy`, minimal CSP) are emitted by `next.config.ts`.
 
 ## Project Structure
 
 ```text
 app/
-  page.tsx               首頁：提案搜尋、意見回饋一覽、公告
-  proposals/page.tsx     提案列表、留言、連署投票
-  feedback/page.tsx      匿名意見回饋
-  profile/page.tsx       個人頁（只顯示已驗證身分，不查提案）
-  admin/page.tsx         伺服器 gate 後的管理面板
-  auth/callback/page.tsx OAuth 回調完成頁
+  page.tsx               Home: proposal search, feedback list, announcements
+  proposals/page.tsx     Proposal list, comments, petition votes
+  feedback/page.tsx      Anonymous feedback
+  profile/page.tsx       Profile page (verified identity only, no proposal queries)
+  admin/page.tsx         Admin panel behind the server gate
+  auth/callback/page.tsx OAuth callback completion page
   api/rights/
-    actions/route.ts     13 動作 POST allowlist
-    feedback/route.ts    公開回饋讀取
-    proposals/pending/   管理員待審核讀取
-    session/route.ts     世代守衛的 session 驗證
+    actions/route.ts     13-action POST allowlist
+    feedback/route.ts    Public feedback reads
+    proposals/pending/   Admin pending-review reads
+    session/route.ts     Generation-guarded session verification
 components/
-  AuthProvider.tsx       世代守衛的身分 provider
-  Navbar.tsx             同步身分、fail-closed 登出
-  admin/                 管理面板客戶端元件
+  AuthProvider.tsx       Generation-guarded identity provider
+  Navbar.tsx             Synced identity, fail-closed logout
+  admin/                 Admin panel client components
 lib/
-  auth/                  伺服器驗證、型別、OAuth 完成
-  rights/                契約、校驗、投影、伺服器動作、客戶端
-  supabase/              request-scoped 伺服器 client
-  supabase.ts            瀏覽器 singleton factory
-proxy.ts                 refresh 傳遞與靜態排除
+  auth/                  Server verification, types, OAuth completion
+  rights/                Contracts, validation, projections, server actions, client
+  supabase/              request-scoped server client
+  supabase.ts            Browser singleton factory
+proxy.ts                 Refresh forwarding and static exclusions
 tests/
-  unit/                  契約、伺服器驗證、文件一致性
-  components/            各頁安全行為
-  integration/           路由、headers、session 邊界
-  e2e/                   真機瀏覽器安全流程
-  fixtures/              離線假 provider、字型 mock
+  unit/                  Contracts, server verification, docs consistency
+  components/            Per-page security behavior
+  integration/           Routes, headers, session boundaries
+  e2e/                   Real-browser security flows
+  fixtures/              Offline fake provider, font mock
 docs/
-  security-source-remediation.md  安全修復邊界與驗證文件
+  security-source-remediation.md  Security remediation scope and verification docs
 ```
 
 ## Documentation
 
-`docs/security-source-remediation.md` 是安全修復的權威文件，各節如下：
+`docs/security-source-remediation.md` is the authoritative document for the security remediation. Its sections are:
 
-| 節 | 內容 |
+| Section | Contents |
 | --- | --- |
-| §1 範圍 | 只改 source，不碰資料庫與部署 |
-| §2 路由與直接呼叫 | 應用程式路由和直接 PostgREST 的差別 |
-| §3 對照表 | 23 項發現的修復、緩解、延後、未驗證 |
-| §4 殘餘風險 | 需資料庫配合的風險 ledger |
-| §5 相容性風險 | 大小寫、Origin、投票總數等已知風險 |
-| §6 離線驗證 | 可執行的離線驗證方式 |
-| §7 部署未測試 | 部署未測試和 source 無保護的區別 |
-| §8 完成 ledger | 已合併 fix packs 的完成紀錄 |
+| §1 Scope | Source changes only, no database or deployment changes |
+| §2 Routes and direct calls | Difference between app routes and direct PostgREST |
+| §3 Mapping | Fixes, mitigations, deferrals, and unverified items across 23 findings |
+| §4 Residual risks | Risk ledger requiring database cooperation |
+| §5 Compatibility risks | Known risks around casing, Origin, vote totals, and more |
+| §6 Offline verification | Executable offline verification methods |
+| §7 Deployment untested | Difference between untested deployment and unprotected source |
+| §8 Completion ledger | Completion record of merged fix packs |
 
-## 測試與離線驗證
+## Testing and Offline Verification
 
 All tests run against a loopback fake Auth/PostgREST provider with fixture users.
 No real Supabase account, Google login, or production secret is needed.
@@ -142,11 +142,12 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_pub
 npm run test:e2e
 ```
 
-`build` 不可裸跑：`/auth/callback` 靜態預渲染會觸發 fail-closed 的瀏覽器
-factory（缺公開設定即拋錯），裸 `npm run build` 在此失敗是預期行為，不是回歸。
-上面的前綴把設定釘到無用的 loopback（port 9）並用
-`tests/fixtures/google-fonts.cjs` mock Google Fonts，讓 build 全程離線。
-全是夾具假 key，不含真實 secret。
+`build` must never run bare: static prerendering of `/auth/callback`
+triggers the fail-closed browser factory (it throws when public config is
+missing), so a bare `npm run build` failing there is expected behavior, not a
+regression. The prefix above pins config to the useless loopback (port 9) and
+mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole
+build offline. All keys are fixture fakes, with no real secrets.
 
 Targeted invocations (no duplicate `--run`):
 

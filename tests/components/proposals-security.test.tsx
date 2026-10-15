@@ -1,0 +1,368 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import ProposalsPage from '../../app/proposals/page';
+import type { AuthContextValue } from '../../components/AuthProvider';
+import { COMMENT_SELECT_STRING, PROPOSAL_SELECT_STRING, PUBLIC_STATUSES } from '../../lib/rights/queries';
+
+const state = vi.hoisted(() => {
+  const anonymous = (): AuthContextValue => ({ status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false });
+  return { auth: anonymous(),
+   reads: vi.fn(), publicRead: vi.fn(), requests: vi.fn(), select: vi.fn(), filter: vi.fn(), update: vi.fn(),
+  publicRows: [{ id: 'p1', title: 'Public proposal', content: 'Body', author_name: 'Student', status: '研議中', upvotes_count: 0, reply: 'Official reply', created_at: '2026-10-14' }],
+  comments: [{ id: 'c1', proposal_id: 'p1', content: 'Existing comment', author_name: '匿名學生', created_at: '2026-10-14' }],
+  };
+});
+function verified(isAdmin = false) {
+  const identity = { id: 'student', email: 'student@nehs.hc.edu.tw', displayName: 'Student', isAdmin };
+  state.auth = { status: 'verified', identity, user: identity, generation: state.auth.generation + 1, isLoggedIn: true, isAdmin };
+}
+vi.mock('../../components/AuthProvider', () => ({ useAuth: () => state.auth }));
+function client() {
+  return {
+    auth: { getSession: async () => ({ data: { session: null } }), getUser: async () => ({ data: { user: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
+    from(table: string) {
+      const query = {
+        select: (columns: string) => { state.select(table, columns); return query; },
+        update: (...args: unknown[]) => { state.update(table, ...args); return query; },
+        in: (column: string, values: string[]) => { state.filter(table, column, values); return query; },
+        neq: () => query, eq: () => query,
+         order: async () => table === 'proposals' ? state.publicRead() : { data: state.comments, error: null },
+      };
+      return query;
+    },
+  };
+}
+vi.mock('@supabase/supabase-js', () => ({ createClient: () => client() }));
+vi.mock('../../lib/supabase', () => ({ createClient: () => client() }));
+vi.mock('../../lib/rights/client', () => ({
+  readRights: (...args: unknown[]) => state.reads(...args),
+  sendRightsAction: (...args: unknown[]) => state.requests(...args),
+  createRightsActionFlight: () => state.requests,
+}));
+beforeEach(() => {
+   state.auth = { status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false };
+   state.publicRead.mockReset().mockImplementation(async () => ({ data: state.publicRows, error: null }));
+  state.reads.mockReset().mockResolvedValue({ ok: true, data: [{ ...state.publicRows[0], id: 'pending', title: 'Private pending', status: '待審核' }] });
+  state.requests.mockReset().mockResolvedValue({ ok: true, data: {}, refresh: 'updated' });
+  state.select.mockClear(); state.filter.mockClear(); state.update.mockClear();
+  vi.spyOn(window, 'alert').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+});
+afterEach(() => { localStorage.clear(); document.cookie = 'auth-token=; Max-Age=0'; vi.restoreAllMocks(); });
+
+test.each(['storage', 'jwt', 'cookie'])('withholds admin controls for forged %s identity', async kind => {
+  // Given: the trusted provider says anonymous, regardless of browser claims.
+  const jwt = `eyJhbGciOiJub25lIn0.${btoa(JSON.stringify({ email: 's411076@nehs.hc.edu.tw' }))}.fake`;
+  if (kind === 'storage') localStorage.setItem('forged-auth', JSON.stringify({ user: { email: 's411076@nehs.hc.edu.tw' } }));
+  if (kind === 'jwt') localStorage.setItem('forged-token', jwt);
+  if (kind === 'cookie') document.cookie = `auth-token=${jwt}`;
+  // When
+  render(<ProposalsPage />);
+  await screen.findAllByText('Public proposal');
+  await act(async () => {});
+  // Then
+  expect(screen.queryByText(/待審核提案區/)).toBeNull();
+  expect(screen.queryByText(/管理員控制台/)).toBeNull();
+  expect(screen.queryByPlaceholderText('例如：關於圖書館開館時間建議...')).toBeNull();
+  expect(state.reads).not.toHaveBeenCalled();
+});
+
+test('creates a student proposal using only raw input, leaving identity/status/count to the server', async () => {
+  // Given
+  verified(); render(<ProposalsPage />);
+  // When
+  fireEvent.change(screen.getByPlaceholderText('例如：關於圖書館開館時間建議...'), { target: { value: '  Draft  ' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: '  New body  ' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'createProposal', payload: { title: 'Draft', content: 'New body', category: '環境與設備' } }, expect.any(Function)));
+  await waitFor(() => expect(screen.getByPlaceholderText('例如：關於圖書館開館時間建議...')).toHaveValue(''));
+  expect(state.reads).not.toHaveBeenCalled();
+});
+
+test('keeps a submitted draft until the action promise confirms receipt', async () => {
+  // Given
+  verified();
+  let confirmReceipt: (result: unknown) => void = () => { throw new Error('Missing receipt'); };
+  state.requests.mockReturnValueOnce(new Promise(resolve => { confirmReceipt = resolve; }));
+  render(<ProposalsPage />);
+  const title = screen.getByPlaceholderText('例如：關於圖書館開館時間建議...');
+  fireEvent.change(title, { target: { value: 'Await receipt' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: 'Body' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  expect(state.requests).toHaveBeenCalledTimes(1);
+  expect(title).toHaveValue('Await receipt');
+  expect(window.alert).not.toHaveBeenCalled();
+  await act(async () => { confirmReceipt({ ok: true, data: {}, refresh: 'updated' }); });
+  expect(title).toHaveValue('');
+  expect(window.alert).toHaveBeenCalledTimes(1);
+});
+
+test.each([true, false])('preserves the anonymous comment option (%s) through the action helper', async anonymous => {
+  // Given
+  verified(); render(<ProposalsPage />);
+  const input = await screen.findByPlaceholderText('寫下您的看法與建議...');
+  // When
+  fireEvent.change(input, { target: { value: '  Comment draft  ' } });
+  if (anonymous) fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+  // Then
+  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'addComment', payload: { proposalId: 'p1', content: 'Comment draft', isAnonymous: anonymous } }, expect.any(Function)));
+  await waitFor(() => expect(input).toHaveValue(''));
+});
+
+test.each(['FORBIDDEN', 'OUTCOME_UNKNOWN'])('preserves proposal draft and shows an explicit %s failure', async code => {
+  // Given
+  verified(); state.requests.mockResolvedValue({ ok: false, code, message: 'Explicit failure' });
+  render(<ProposalsPage />);
+  const input = screen.getByPlaceholderText('例如：關於圖書館開館時間建議...');
+  fireEvent.change(input, { target: { value: 'Keep draft' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: 'Keep body' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  expect(await screen.findByRole('alert')).toHaveTextContent('Explicit failure');
+  expect(input).toHaveValue('Keep draft');
+});
+
+test('validates overlong comments with the shared validator before any mutation', async () => {
+  // Given
+  verified(); render(<ProposalsPage />);
+  const input = await screen.findByPlaceholderText('寫下您的看法與建議...');
+  fireEvent.change(input, { target: { value: '😀'.repeat(1001) } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+  // Then
+  expect(await screen.findByRole('alert')).toBeVisible();
+  expect(state.requests).not.toHaveBeenCalled();
+  expect(input).toHaveValue('😀'.repeat(1001));
+});
+
+test.each([
+  ['approveProposal', '✅ 核可發布', { id: 'pending' }],
+  ['rejectProposal', '❌ 退回提案', { id: 'pending' }],
+  ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply' }],
+  ['deleteProposal', '🗑️ 刪除', { id: 'p1' }],
+  ['deleteComment', '✕', { id: 'c1', proposalId: 'p1' }],
+] as const)('routes admin %s through the allowlisted helper', async (action, button, payload) => {
+  // Given
+  verified(true); render(<ProposalsPage />);
+  await screen.findByText('Existing comment'); await screen.findByText('Private pending');
+  // When
+  fireEvent.click(screen.getByRole('button', { name: button }));
+  // Then
+  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action, payload }, expect.any(Function)));
+});
+
+test.each([true, false])('requires confirmation before clearing an existing official reply (%s)', async confirmed => {
+  // Given
+  verified(true); vi.mocked(window.confirm).mockReturnValue(confirmed);
+  render(<ProposalsPage />);
+  fireEvent.change(await screen.findByPlaceholderText('輸入官方回覆內容...'), { target: { value: '  ' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  // Then
+  expect(window.confirm).toHaveBeenCalled();
+  if (confirmed) await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'updateProposalControl', payload: { id: 'p1', status: '研議中', reply: '' } }, expect.any(Function)));
+  else expect(state.requests).not.toHaveBeenCalled();
+});
+
+test('reports deleteComment rejection without removing the displayed comment', async () => {
+  // Given
+  verified(true); state.requests.mockResolvedValue({ ok: false, code: 'FORBIDDEN', message: 'Comment deletion denied' });
+  render(<ProposalsPage />); await screen.findByText('Existing comment');
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '✕' }));
+  // Then
+  expect(await screen.findByRole('alert')).toHaveTextContent('Comment deletion denied');
+  expect(screen.getByText('Existing comment')).toBeVisible();
+});
+
+test('discards a delayed pending response after logout, including when admin is subsequently restored', async () => {
+  // Given
+  let resolve: (value: unknown) => void = () => { throw new Error('Not initialized'); };
+  state.reads.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  verified(true); const view = render(<ProposalsPage />);
+  await waitFor(() => expect(state.reads).toHaveBeenCalledTimes(1));
+  // When
+  state.auth = { status: 'anonymous', identity: null, user: null, generation: 2, isLoggedIn: false, isAdmin: false };
+  view.rerender(<ProposalsPage />);
+  await act(async () => resolve({ ok: true, data: [{ ...state.publicRows[0], id: 'stale', title: 'Stale private', status: '待審核' }] }));
+  verified(true); view.rerender(<ProposalsPage />);
+  // Then
+  await screen.findByText('Private pending');
+  expect(screen.queryByText('Stale private')).toBeNull();
+});
+
+test('excludes unknown and private states and limits explicit comment reads to visible public IDs', async () => {
+  // Given
+  const publicRow = state.publicRows[0];
+  state.publicRows.push(...['unknown', '待審核', '被退回'].map(status => ({ ...state.publicRows[0], id: status, title: status + ' hidden', status })));
+  // When
+  render(<ProposalsPage />);
+  // Then
+  try {
+    await screen.findByText('Existing comment');
+    expect(screen.queryByText(/hidden/)).toBeNull();
+    expect(state.select).toHaveBeenCalledWith('proposals', PROPOSAL_SELECT_STRING);
+    expect(state.select).toHaveBeenCalledWith('proposal_comments', COMMENT_SELECT_STRING);
+    expect(state.filter).toHaveBeenCalledWith('proposals', 'status', [...PUBLIC_STATUSES]);
+    expect(state.filter).toHaveBeenCalledWith('proposal_comments', 'proposal_id', ['p1']);
+  } finally { if (publicRow) state.publicRows.splice(0, state.publicRows.length, publicRow); }
+});
+
+test('sends votes through setVoteCount rather than the database writer', async () => {
+  // Given
+  state.requests.mockResolvedValueOnce({ ok: true, data: { id: 'p1', upvotes_count: 1 }, refresh: 'updated' });
+  verified(); render(<ProposalsPage />);
+  await screen.findByText('Public proposal');
+  // When
+  fireEvent.click(screen.getByRole('button', { name: /覆議\/聯署/ }));
+  // Then
+  await waitFor(() => expect(state.requests).toHaveBeenCalledExactlyOnceWith({ action: 'setVoteCount', payload: { proposalId: 'p1', count: 1 } }));
+  expect(state.update).not.toHaveBeenCalled();
+});
+
+test.each(['malformed', 'rejected', 'provider-error', 'null'])('reports a %s public read without an empty list or unhandled rejection', async kind => {
+  // Given
+  if (kind === 'rejected') state.publicRead.mockRejectedValue(new TypeError('Read rejected'));
+  else state.publicRead.mockResolvedValue({ data: kind === 'null' ? null : { malformed: true }, error: kind === 'provider-error' ? { message: 'Denied' } : null });
+  const unhandled = vi.fn();
+  process.on('unhandledRejection', unhandled);
+  try {
+    // When
+    render(<ProposalsPage />);
+    // Then
+    expect(await screen.findByRole('alert')).toHaveTextContent('提案清單更新失敗');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(screen.queryByText('目前尚無公開提案。')).toBeNull();
+    expect(screen.getByRole('button', { name: '重試公開提案' })).toBeVisible();
+  } finally { process.off('unhandledRejection', unhandled); }
+});
+
+test('shows independent loading states before either list read settles', () => {
+  // Given
+  verified(true);
+  state.publicRead.mockReturnValue(new Promise(() => {}));
+  state.reads.mockReturnValue(new Promise(() => {}));
+  // When
+  render(<ProposalsPage />);
+  // Then
+  expect(screen.getByText('公開提案載入中…')).toBeVisible();
+  expect(screen.getByText('待審核提案載入中…')).toBeVisible();
+  expect(screen.queryByText(/目前尚無/)).toBeNull();
+});
+
+test.each(['FORBIDDEN', 'UNAVAILABLE'])('keeps healthy public proposals visible when pending read is %s', async code => {
+  // Given
+  verified(true); state.reads.mockResolvedValue({ ok: false, code, message: 'Pending denied' });
+  // When
+  render(<ProposalsPage />);
+  // Then
+  expect(await screen.findByRole('alert')).toHaveTextContent('待審核提案清單更新失敗');
+  expect(await screen.findByText('Public proposal')).toBeVisible();
+  expect(screen.queryByText('目前尚無等待審核的提案。')).toBeNull();
+  expect(screen.getByRole('button', { name: '重試待審核提案' })).toBeVisible();
+});
+
+test('shows empty lists only after successful zero-row reads', async () => {
+  // Given
+  verified(true); state.publicRead.mockResolvedValue({ data: [], error: null });
+  state.reads.mockResolvedValue({ ok: true, data: [] });
+  // When
+  render(<ProposalsPage />);
+  // Then
+  expect(await screen.findByText('目前尚無公開提案。')).toBeVisible();
+  expect(await screen.findByText('目前尚無等待審核的提案。')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('recovers a failed public list through its retry without rereading pending proposals', async () => {
+  // Given
+  verified(true); state.publicRead.mockResolvedValueOnce({ data: [], error: { message: 'Failed' } });
+  render(<ProposalsPage />);
+  const retry = await screen.findByRole('button', { name: '重試公開提案' });
+  // When
+  fireEvent.click(retry);
+  // Then
+  expect(await screen.findByText('Public proposal')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(state.reads).toHaveBeenCalledTimes(1);
+});
+
+test('confirms receipt and review without promising profile review-status after creation', async () => {
+  // Given
+  verified(); render(<ProposalsPage />);
+  fireEvent.change(screen.getByPlaceholderText('例如：關於圖書館開館時間建議...'), { target: { value: 'New proposal' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: 'New body' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringMatching(/已收到.*審核/)));
+  expect(window.alert).not.toHaveBeenCalledWith(expect.stringMatching(/個人資料|查看審核狀態/));
+});
+
+test('retries a rejected pending read independently of the healthy public list', async () => {
+  // Given
+  verified(true); state.reads.mockRejectedValueOnce(new TypeError('Pending read rejected'));
+  render(<ProposalsPage />);
+  const retry = await screen.findByRole('button', { name: '重試待審核提案' });
+  await screen.findByText('Public proposal');
+  // When
+  fireEvent.click(retry);
+  // Then
+  expect(await screen.findByText('Private pending')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(state.publicRead).toHaveBeenCalledTimes(1);
+});
+
+test('discards a rejected public read from a previous auth generation', async () => {
+  // Given
+  let rejectRead: (reason: Error) => void = () => { throw new Error('Not initialized'); };
+  state.publicRead.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRead = reject; }));
+  const view = render(<ProposalsPage />);
+  // When
+  verified(); view.rerender(<ProposalsPage />);
+  await screen.findByText('Public proposal');
+  await act(async () => rejectRead(new TypeError('Stale failure')));
+  // Then
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('Public proposal')).toBeVisible();
+});
+
+test('owns a rejected mutation event without clearing the draft or claiming receipt', async () => {
+  // Given
+  verified(); state.requests.mockRejectedValueOnce(new TypeError('Action rejected'));
+  render(<ProposalsPage />);
+  const title = screen.getByPlaceholderText('例如：關於圖書館開館時間建議...');
+  fireEvent.change(title, { target: { value: 'Keep draft' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: 'Keep body' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  expect(await screen.findByRole('alert')).toHaveTextContent('無法確認是否已儲存');
+  expect(title).toHaveValue('Keep draft');
+  expect(window.alert).not.toHaveBeenCalled();
+});
+
+test('returns typed UNAVAILABLE to refresh callers when the public parser throws', async () => {
+  // Given
+  verified();
+  state.requests.mockImplementationOnce(async (_request: unknown, refresh: () => Promise<unknown>) => {
+    expect(await refresh()).toMatchObject({ ok: false, code: 'UNAVAILABLE' });
+    return { ok: true, data: {}, refresh: 'failed', message: '已儲存，但清單更新失敗' };
+  });
+  render(<ProposalsPage />); await screen.findByText('Public proposal');
+  state.publicRead.mockResolvedValueOnce({ data: { malformed: true }, error: null });
+  fireEvent.change(screen.getByPlaceholderText('例如：關於圖書館開館時間建議...'), { target: { value: 'New proposal' } });
+  fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: 'New body' } });
+  // When
+  fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
+  // Then
+  await waitFor(() => expect(window.alert).toHaveBeenCalled());
+  expect(screen.getByRole('button', { name: '重試公開提案' })).toBeVisible();
+  expect(screen.queryByText('目前尚無公開提案。')).toBeNull();
+});

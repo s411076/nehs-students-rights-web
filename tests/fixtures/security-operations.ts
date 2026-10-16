@@ -5,8 +5,8 @@ export async function moderation(page: Page, context: BrowserContext, request: A
   await login(context, 'admin');
   await page.goto('/proposals');
   await expect(page.getByText('Fixture 待審核', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /核可發布/ }).click();
-  await expect(page.getByRole('button', { name: /核可發布/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /核准上架/ }).click();
+  await expect(page.getByRole('button', { name: /核准上架/ })).toHaveCount(0);
   expect((await state(request)).rows('proposals').find(row => row.id === 'proposal-2')?.status).toBe('研議中');
   const card = page.locator('[id^="item-"]').filter({ has: page.getByRole('heading', { name: 'Fixture 研議中', exact: true }) });
   await card.getByLabel('提案狀態：Fixture 研議中', { exact: true }).selectOption('通過');

@@ -304,6 +304,7 @@ test('clearing a nonempty reply requires confirmation', async () => {
   const calls = feedbackListFetch([withReply]);
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   render(<FeedbackPage />);
+  fireEvent.click(screen.getByRole('tab', { name: /^已回覆/ }));
   await screen.findByText('Existing official reply');
   const box = screen.getByPlaceholderText('請在此輸入官方回應內容...');
   // When clearing is cancelled
@@ -379,6 +380,7 @@ test('retains a reply draft and its original expectedVersion through conflict an
   const calls = stubFetch(url => url.includes('/actions')
     ? Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 }) : feedbackResponse([row]));
   render(<FeedbackPage />);
+  fireEvent.click(screen.getByRole('tab', { name: /^全部/ }));
   const input = await screen.findByPlaceholderText('請在此輸入官方回應內容...');
   // When
   fireEvent.change(input, { target: { value: 'Keep my reply draft' } });

@@ -10,6 +10,43 @@ export default function Navbar() {
   const [loggingOut, setLoggingOut] = useState(false)
   const { logoutError, logoutPending, beginLogout, reportLogoutFailure } = useLogoutNotice()
   const logoutGeneration = useRef<number | null>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    const trigger = menuTriggerRef.current
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    closeButtonRef.current?.focus()
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setIsOpen(false)
+      } else if (event.key === 'Tab') {
+        const controls = drawerRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled])')
+        const first = controls?.[0]
+        const last = controls?.[controls.length - 1]
+        const outside = !drawerRef.current?.contains(document.activeElement)
+        if (event.shiftKey && (document.activeElement === first || outside)) {
+          event.preventDefault()
+          last?.focus()
+        } else if (!event.shiftKey && (document.activeElement === last || outside)) {
+          event.preventDefault()
+          first?.focus()
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousOverflow
+      trigger?.focus()
+    }
+  }, [isOpen])
 
   // Release the local logging-out gate only when the provider advances to a
   // fresh generation (a new verification). Stale responses for the old
@@ -42,38 +79,53 @@ export default function Navbar() {
   return (
     <>
       <nav className="bg-white dark:bg-slate-900 text-gray-900 dark:text-white border-b dark:border-slate-800 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={() => setIsOpen(true)}
-              className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color] text-gray-700 dark:text-slate-200"
+              type="button"
+              ref={menuTriggerRef}
+              onClick={(event) => { event.currentTarget.focus(); setIsOpen(true) }}
+              aria-label="開啟側邊選單"
+              aria-expanded={isOpen}
+              aria-controls="navbar-drawer"
+              className="shrink-0 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color] text-gray-700 dark:text-slate-200"
               title="開啟側邊選單"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" />
               </svg>
             </button>
 
-            <Link className="font-extrabold text-lg tracking-tight text-inherit flex items-center gap-2" href="/">
+            <Link className="min-w-0 truncate font-extrabold text-lg tracking-tight text-inherit" href="/">
               🎓 竹科實中學權組
             </Link>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 max-w-1/2 items-center justify-end gap-2 sm:gap-3">
              {(loggingOut || logoutPending) && !logoutError && (
-              <p data-testid="operation-status" className="text-xs font-bold text-gray-500 dark:text-slate-400">
+              <p data-testid="operation-status" role="status" aria-live="polite" className="min-w-0 truncate text-xs font-bold text-gray-500 dark:text-slate-400">
                 登出中…
               </p>
             )}
             {logoutError && (
-              <p data-testid="operation-status" role="alert" className="text-xs font-bold text-red-600 dark:text-red-400">
-                {logoutError}
-              </p>
+              <>
+                <p data-testid="operation-status" role="alert" title={logoutError} className="min-w-0 truncate text-xs font-bold text-red-600 dark:text-red-400">
+                  {logoutError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="shrink-0 min-h-11 px-3 rounded-xl text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
+                >
+                  重試
+                </button>
+              </>
             )}
             {isPrivileged && (
               <button
+                type="button"
                 onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition"
+                className="shrink-0 whitespace-nowrap bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition"
               >
                 🚪 登出
               </button>
@@ -83,24 +135,36 @@ export default function Navbar() {
       </nav>
 
       {isOpen && (
-        <div
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="關閉導覽選單背景"
           onClick={() => setIsOpen(false)}
           className="fixed inset-0 bg-black/50 z-50 transition-opacity"
         />
       )}
 
       <aside
-        className={`fixed top-0 left-0 bottom-0 w-72 bg-white dark:bg-slate-900 z-50 shadow-2xl transform transition-transform duration-300 ease-in-out border-r dark:border-slate-800 flex flex-col justify-between ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+        ref={drawerRef}
+        id="navbar-drawer"
+        role="dialog"
+        aria-modal={isOpen ? true : undefined}
+        aria-label="導覽選單"
+        inert={!isOpen}
+        className={`fixed top-0 left-0 bottom-0 w-72 max-w-full max-h-dvh overflow-y-auto overscroll-contain bg-white dark:bg-slate-900 z-50 shadow-2xl transform transition-transform duration-300 ease-in-out motion-reduce:transition-opacity motion-reduce:translate-x-0 border-r dark:border-slate-800 flex flex-col justify-between ${
+          isOpen ? 'translate-x-0' : '-translate-x-full motion-reduce:opacity-0'
         }`}
       >
-        <div>
+        <div className="shrink-0">
           <div className="p-5 border-b dark:border-slate-800 flex justify-between items-center">
             <span className="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
               🎓 導覽選單
             </span>
             <button
+              type="button"
+              ref={closeButtonRef}
               onClick={() => setIsOpen(false)}
+              aria-label="關閉側邊選單"
               className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color]"
             >
               ✕
@@ -150,7 +214,7 @@ export default function Navbar() {
         </div>
 
         {isPrivileged && userName && (
-          <div className="p-4 border-t dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50">
+          <div className="shrink-0 p-4 border-t dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50">
             <p className="text-xs text-gray-500 dark:text-slate-400 font-bold">目前登入為：</p>
             <p className="text-sm font-extrabold text-gray-800 dark:text-slate-200 truncate mt-0.5">{userName}</p>
           </div>

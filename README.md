@@ -1,4 +1,4 @@
-# Hsinchu Senior High School Student Rights Website
+# NEHS Student Rights Website
 
 A campus website for student proposals, petitions, feedback, and announcements, built with Next.js App Router and Supabase.
 

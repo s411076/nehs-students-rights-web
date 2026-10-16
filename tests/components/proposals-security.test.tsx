@@ -1,15 +1,14 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ProposalsPage from '../../app/proposals/page';
 import type { AuthContextValue } from '../../components/AuthProvider';
-import { COMMENT_SELECT_STRING, PROPOSAL_SELECT_STRING, PUBLIC_STATUSES } from '../../lib/rights/queries';
 
 const state = vi.hoisted(() => {
   const anonymous = (): AuthContextValue => ({ status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false });
   return { auth: anonymous(),
-   reads: vi.fn(), publicRead: vi.fn(), requests: vi.fn(), select: vi.fn(), filter: vi.fn(), update: vi.fn(),
-  publicRows: [{ id: 'p1', title: 'Public proposal', content: 'Body', author_name: 'Student', status: '研議中', upvotes_count: 0, reply: 'Official reply', created_at: '2026-10-14' }],
-  comments: [{ id: 'c1', proposal_id: 'p1', content: 'Existing comment', author_name: '匿名學生', created_at: '2026-10-14' }],
+    reads: vi.fn(), publicRead: vi.fn(), commentRead: vi.fn(), itemRead: vi.fn(), requests: vi.fn(), select: vi.fn(), filter: vi.fn(), update: vi.fn(),
+   publicRows: [{ id: 'p1', title: 'Public proposal', content: 'Body', author_name: 'Student', status: '研議中', upvotes_count: 0, reply: 'Official reply', created_at: '2026-10-14', version: 1, viewer_voted: false, legacy_upvotes_count: 0 }],
+   comments: [{ id: 'c1', proposal_id: 'p1', content: 'Existing comment', author_name: '匿名學生', created_at: '2026-10-14', version: 1 }],
   };
 });
 function verified(isAdmin = false) {
@@ -35,13 +34,39 @@ function client() {
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => client() }));
 vi.mock('../../lib/supabase', () => ({ createClient: () => client() }));
 vi.mock('../../lib/rights/client', () => ({
-  readRights: (...args: unknown[]) => state.reads(...args),
+  readRights: async (path: string, parse: (value: unknown) => unknown) => {
+    try {
+      let data: unknown;
+      if (path.startsWith('/api/rights/proposals/pending')) {
+        const result = await state.reads(path, parse);
+        if (!result.ok) return result;
+        data = Array.isArray(result.data) ? { items: result.data, nextCursor: null } : result.data;
+      } else if (path.includes('/comments')) {
+        data = await state.commentRead(path);
+      } else if (path.startsWith('/api/rights/items')) {
+        data = await state.itemRead(path);
+      } else {
+        const result = await state.publicRead(path);
+        if (result.error || !Array.isArray(result.data)) return { ok: false, code: 'UNAVAILABLE' };
+        data = { items: result.data, nextCursor: result.nextCursor ?? null };
+      }
+      const parsed = parse(data);
+      return parsed === null ? { ok: false, code: 'UNAVAILABLE' } : { ok: true, data: parsed };
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      return { ok: false, code: 'UNAVAILABLE' };
+    }
+  },
   sendRightsAction: (...args: unknown[]) => state.requests(...args),
   createRightsActionFlight: () => state.requests,
 }));
 beforeEach(() => {
+   window.history.replaceState(null, '', '/proposals');
+   HTMLElement.prototype.scrollIntoView = vi.fn();
    state.auth = { status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false };
    state.publicRead.mockReset().mockImplementation(async () => ({ data: state.publicRows, error: null }));
+   state.commentRead.mockReset().mockImplementation(async () => ({ items: state.comments, nextCursor: null }));
+   state.itemRead.mockReset().mockResolvedValue(null);
   state.reads.mockReset().mockResolvedValue({ ok: true, data: [{ ...state.publicRows[0], id: 'pending', title: 'Private pending', status: '待審核' }] });
   state.requests.mockReset().mockResolvedValue({ ok: true, data: {}, refresh: 'updated' });
   state.select.mockClear(); state.filter.mockClear(); state.update.mockClear();
@@ -141,11 +166,11 @@ test('validates overlong comments with the shared validator before any mutation'
 });
 
 test.each([
-  ['approveProposal', '✅ 核可發布', { id: 'pending' }],
-  ['rejectProposal', '❌ 退回提案', { id: 'pending' }],
-  ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply' }],
-  ['deleteProposal', '🗑️ 刪除', { id: 'p1' }],
-  ['deleteComment', /刪除留言/, { id: 'c1', proposalId: 'p1' }],
+   ['approveProposal', '✅ 核可發布', { id: 'pending', expectedVersion: 1 }],
+   ['rejectProposal', '❌ 退回提案', { id: 'pending', expectedVersion: 1 }],
+   ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply', expectedVersion: 1 }],
+   ['deleteProposal', '🗑️ 刪除', { id: 'p1', expectedVersion: 1 }],
+   ['deleteComment', /刪除留言/, { id: 'c1', proposalId: 'p1', expectedVersion: 1 }],
 ] as const)('routes admin %s through the allowlisted helper', async (action, button, payload) => {
   // Given
   verified(true); render(<ProposalsPage />);
@@ -153,7 +178,7 @@ test.each([
   // When
   fireEvent.click(screen.getByRole('button', { name: button }));
   // Then
-  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action, payload }, expect.any(Function)));
+   await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action, payload }, action.startsWith('delete') ? undefined : expect.any(Function)));
 });
 
 test.each([true, false])('requires confirmation before clearing an existing official reply (%s)', async confirmed => {
@@ -165,7 +190,7 @@ test.each([true, false])('requires confirmation before clearing an existing offi
   fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
   // Then
   expect(window.confirm).toHaveBeenCalled();
-  if (confirmed) await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'updateProposalControl', payload: { id: 'p1', status: '研議中', reply: '' } }, expect.any(Function)));
+   if (confirmed) await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'updateProposalControl', payload: { id: 'p1', status: '研議中', reply: '', expectedVersion: 1 } }, expect.any(Function)));
   else expect(state.requests).not.toHaveBeenCalled();
 });
 
@@ -196,32 +221,31 @@ test('discards a delayed pending response after logout, including when admin is 
   expect(screen.queryByText('Stale private')).toBeNull();
 });
 
-test('excludes unknown and private states and limits explicit comment reads to visible public IDs', async () => {
+test('excludes private states and uses only per-proposal public comment endpoints', async () => {
   // Given
   const publicRow = state.publicRows[0];
-  state.publicRows.push(...['unknown', '待審核', '被退回'].map(status => ({ ...state.publicRows[0], id: status, title: status + ' hidden', status })));
+   state.publicRows.push(...['待審核', '被退回'].map(status => ({ ...state.publicRows[0], id: status, title: status + ' hidden', status })));
   // When
   render(<ProposalsPage />);
   // Then
   try {
     await screen.findByText('Existing comment');
     expect(screen.queryByText(/hidden/)).toBeNull();
-    expect(state.select).toHaveBeenCalledWith('proposals', PROPOSAL_SELECT_STRING);
-    expect(state.select).toHaveBeenCalledWith('proposal_comments', COMMENT_SELECT_STRING);
-    expect(state.filter).toHaveBeenCalledWith('proposals', 'status', [...PUBLIC_STATUSES]);
-    expect(state.filter).toHaveBeenCalledWith('proposal_comments', 'proposal_id', ['p1']);
+     expect(state.select).not.toHaveBeenCalled();
+     expect(state.filter).not.toHaveBeenCalled();
+     expect(state.publicRead).toHaveBeenCalledWith(expect.stringContaining('/api/rights/proposals?limit=20'));
   } finally { if (publicRow) state.publicRows.splice(0, state.publicRows.length, publicRow); }
 });
 
-test('sends votes through setVoteCount rather than the database writer', async () => {
+test('sends desired vote state without browser-authored totals or database writes', async () => {
   // Given
-  state.requests.mockResolvedValueOnce({ ok: true, data: { id: 'p1', upvotes_count: 1 }, refresh: 'updated' });
+   state.requests.mockResolvedValueOnce({ ok: true, data: { id: 'p1', voted: true, upvotes_count: 1 }, refresh: 'updated' });
   verified(); render(<ProposalsPage />);
   await screen.findByText('Public proposal');
   // When
   fireEvent.click(screen.getByRole('button', { name: /覆議\/聯署/ }));
   // Then
-  await waitFor(() => expect(state.requests).toHaveBeenCalledExactlyOnceWith({ action: 'setVoteCount', payload: { proposalId: 'p1', count: 1 } }));
+   await waitFor(() => expect(state.requests).toHaveBeenCalledExactlyOnceWith({ action: 'setVote', payload: { proposalId: 'p1', voted: true } }, undefined));
   expect(state.update).not.toHaveBeenCalled();
 });
 
@@ -365,4 +389,182 @@ test('returns typed UNAVAILABLE to refresh callers when the public parser throws
   await waitFor(() => expect(window.alert).toHaveBeenCalled());
   expect(screen.getByRole('button', { name: '重試公開提案' })).toBeVisible();
   expect(screen.queryByText('目前尚無公開提案。')).toBeNull();
+});
+
+test('pages public and pending proposals independently while keeping previously loaded cards', async () => {
+  // Given
+  verified(true);
+  const cursor = { created_at: '2026-10-14T00:00:00.123456Z', id: 'p1' };
+  state.publicRead.mockImplementation(async (path: string) => ({ data: path.includes('cursor=')
+    ? [{ ...state.publicRows[0], id: 'p2', title: 'Older public' }] : state.publicRows, error: null,
+  nextCursor: path.includes('cursor=') ? null : cursor }));
+  state.reads.mockImplementation(async (path: string) => ({ ok: true, data: { items: [{ ...state.publicRows[0],
+    id: path.includes('cursor=') ? 'pending-2' : 'pending', title: path.includes('cursor=') ? 'Older pending' : 'Private pending', status: '待審核' }],
+  nextCursor: path.includes('cursor=') ? null : cursor } }));
+  render(<ProposalsPage />);
+  // When
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多公開提案' }));
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多待審核提案' }));
+  // Then
+  expect(await screen.findByText('Older public')).toBeVisible();
+  expect(await screen.findByText('Older pending')).toBeVisible();
+  expect(screen.getByText('Public proposal')).toBeVisible();
+  expect(screen.getByText('Private pending')).toBeVisible();
+  expect(JSON.parse(new URL(state.publicRead.mock.calls.at(-1)?.[0], 'http://localhost').searchParams.get('cursor') ?? 'null')).toEqual(cursor);
+});
+
+test('continues comments per proposal without a cross-proposal cap', async () => {
+  // Given
+  state.publicRead.mockResolvedValue({ data: [...state.publicRows, { ...state.publicRows[0], id: 'p2', title: 'Second proposal' }], error: null });
+  state.commentRead.mockImplementation(async (path: string) => {
+    const url = new URL(path, 'http://localhost');
+    const proposalId = url.pathname.includes('/p2/') ? 'p2' : 'p1';
+    const more = url.searchParams.has('cursor');
+    return { items: [{ ...state.comments[0], id: `${proposalId}-${more}`, proposal_id: proposalId, content: `${proposalId} comment ${more ? 'next' : 'first'}` }],
+      nextCursor: more ? null : { created_at: '2026-10-14T00:00:00.123456Z', id: `${proposalId}-first` } };
+  });
+  render(<ProposalsPage />);
+  await screen.findByText('p2 comment first');
+  // When
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多留言：Public proposal' }));
+  // Then
+  expect(await screen.findByText('p1 comment next')).toBeVisible();
+  expect(screen.getByText('p1 comment first')).toBeVisible();
+  expect(screen.getByText('p2 comment first')).toBeVisible();
+  expect(state.commentRead.mock.calls.filter(([path]) => String(path).includes('/p2/'))).toHaveLength(1);
+});
+
+test('retains control draft baseVersion when newer proposal content is reloaded', async () => {
+  // Given
+  verified(true);
+  state.requests.mockResolvedValue({ ok: false, code: 'CONFLICT', message: 'Conflict' });
+  render(<ProposalsPage />);
+  const input = await screen.findByPlaceholderText('輸入官方回覆內容...');
+  // When
+  fireEvent.change(input, { target: { value: 'My unreconciled reply' } });
+  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  await screen.findByRole('alert');
+  state.publicRead.mockResolvedValue({ data: [{ ...state.publicRows[0], version: 2, reply: 'New server reply' }], error: null });
+  fireEvent.click(screen.getByRole('button', { name: '重新載入最新資料' }));
+  await screen.findByText('New server reply');
+  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  // Then
+  await waitFor(() => expect(state.requests).toHaveBeenCalledTimes(2));
+  expect(input).toHaveValue('My unreconciled reply');
+  expect(state.requests.mock.calls.map(([request]) => request.payload.expectedVersion)).toEqual([1, 1]);
+  expect(screen.getByRole('alert')).toHaveTextContent(/草稿已保留.*重新載入/);
+});
+
+test('fails closed on an unknown public status instead of querying its comments', async () => {
+  // Given
+  state.publicRead.mockResolvedValue({ data: [{ ...state.publicRows[0], status: 'unknown', title: 'Hidden unknown' }], error: null });
+  // When
+  render(<ProposalsPage />);
+  // Then
+  expect(await screen.findByRole('alert')).toHaveTextContent('提案清單更新失敗');
+  expect(screen.queryByText('Hidden unknown')).toBeNull();
+  expect(state.commentRead).not.toHaveBeenCalled();
+});
+
+test.each([true, false])('fetches off-page proposal hashes only through public visibility (visible=%s)', async visible => {
+  // Given
+  window.history.replaceState(null, '', '/proposals#item-off-page');
+  state.itemRead.mockResolvedValue({ ...state.publicRows[0], id: 'off-page', title: 'Targeted proposal', status: visible ? '研議中' : '待審核' });
+  // When
+  render(<ProposalsPage />);
+  // Then
+  await waitFor(() => expect(state.itemRead).toHaveBeenCalledOnce());
+  if (visible) expect(await screen.findByText('Targeted proposal')).toBeVisible();
+  else { await screen.findByRole('alert'); expect(screen.queryByText('Targeted proposal')).toBeNull(); }
+  expect(state.reads).not.toHaveBeenCalled();
+});
+
+test('retains proposal control and anonymous comment drafts when a newer insert moves the twentieth row off page', async () => {
+  // Given a full page with dirty control fields and a separate anonymous comment.
+  verified(true);
+  const target = state.publicRows[0];
+  if (!target) throw new TypeError('Missing proposal fixture');
+  const first = Array.from({ length: 19 }, (_, index) => ({ ...target, id: `first-${index}`, title: `First ${index}` }));
+  let moved = false;
+  const cursor = { created_at: '2026-10-14T00:00:00.123456Z', id: 'first-18' };
+  state.publicRead.mockImplementation(async (path: string) => ({ data: path.includes('cursor=')
+    ? [{ ...target, version: 2, status: '通過', reply: 'New server control' }]
+    : moved ? [{ ...target, id: 'new', title: 'New inserted proposal' }, ...first] : [...first, target],
+  nextCursor: moved && !path.includes('cursor=') ? cursor : null, error: null }));
+  state.commentRead.mockResolvedValue({ items: [], nextCursor: null });
+  state.requests.mockResolvedValue({ ok: false, code: 'CONFLICT', message: 'Conflict' });
+  render(<ProposalsPage />);
+  await screen.findByText(target.title);
+  const card = document.getElementById(`item-${target.id}`);
+  if (!card) throw new TypeError('Missing twentieth proposal');
+  const editor = within(card);
+  fireEvent.change(editor.getByRole('textbox', { name: /官方回覆/ }), { target: { value: 'Unsaved proposal reply' } });
+  fireEvent.change(editor.getByRole('combobox'), { target: { value: '不採納' } });
+  fireEvent.change(editor.getByRole('textbox', { name: /新增留言/ }), { target: { value: 'Unsaved anonymous comment' } });
+  fireEvent.click(editor.getByRole('checkbox'));
+  // When a refresh unmounts the row, followed by its continuation remount.
+  moved = true;
+  fireEvent.click(editor.getByRole('button', { name: '重新載入最新資料' }));
+  await screen.findByText('New inserted proposal');
+  expect(document.getElementById(`item-${target.id}`)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '載入更多公開提案' }));
+  await screen.findByText(target.title);
+  const restored = document.getElementById(`item-${target.id}`);
+  if (!restored) throw new TypeError('Missing restored proposal');
+  const drafts = within(restored);
+  // Then all row-owned input is retained, with no silent version rebase.
+  expect(drafts.getByRole('textbox', { name: /官方回覆/ })).toHaveValue('Unsaved proposal reply');
+  expect(drafts.getByRole('combobox')).toHaveValue('不採納');
+  expect(drafts.getByRole('textbox', { name: /新增留言/ })).toHaveValue('Unsaved anonymous comment');
+  expect(drafts.getByRole('checkbox')).toBeChecked();
+  fireEvent.click(drafts.getByRole('button', { name: /儲存修改/ }));
+  await drafts.findByRole('alert');
+  expect(state.requests).toHaveBeenCalledWith({ action: 'updateProposalControl', payload: {
+    id: target.id, status: '不採納', reply: 'Unsaved proposal reply', expectedVersion: 1,
+  } }, expect.any(Function));
+  expect(JSON.parse(new URL(state.publicRead.mock.calls[2]?.[0], 'http://localhost').searchParams.get('cursor') ?? 'null')).toEqual(cursor);
+});
+
+test('clears proposal control and comment drafts on identity changes even without a generation change', async () => {
+  // Given distinct unsaved drafts in the first admin's page scope.
+  verified(true);
+  const view = render(<ProposalsPage />);
+  fireEvent.change(await screen.findByPlaceholderText('輸入官方回覆內容...'), { target: { value: 'First admin reply' } });
+  fireEvent.change(screen.getByRole('combobox', { name: /提案狀態/ }), { target: { value: '不採納' } });
+  fireEvent.change(screen.getByPlaceholderText('寫下您的看法與建議...'), { target: { value: 'First admin comment' } });
+  fireEvent.click(screen.getByRole('checkbox'));
+  const previous = state.auth;
+  const identity = { id: 'other-admin', email: 'other-admin@nehs.hc.edu.tw', displayName: 'Other', isAdmin: true };
+  // When a different verified user owns the same page and entities.
+  state.auth = { status: 'verified', identity, user: identity, generation: previous.generation, isLoggedIn: true, isAdmin: true };
+  view.rerender(<ProposalsPage />);
+  // Then no old-user state is visible, including when the previous user returns.
+  expect(await screen.findByPlaceholderText('輸入官方回覆內容...')).toHaveValue('Official reply');
+  expect(screen.getByRole('combobox', { name: /提案狀態/ })).toHaveValue('研議中');
+  expect(screen.getByPlaceholderText('寫下您的看法與建議...')).toHaveValue('');
+  expect(screen.getByRole('checkbox')).not.toBeChecked();
+  state.auth = previous; view.rerender(<ProposalsPage />);
+  expect(await screen.findByPlaceholderText('輸入官方回覆內容...')).toHaveValue('Official reply');
+  expect(screen.getByPlaceholderText('寫下您的看法與建議...')).toHaveValue('');
+});
+
+test.each(['hidden', 'deleted'] as const)('clears a cached proposal target on %s reload without falling back to its pending row', async outcome => {
+  // Given public and private reads for the same linked ID.
+  verified(true);
+  const target = { ...state.publicRows[0], id: 'off-page', title: 'Previously public target' };
+  window.history.replaceState(null, '', '/proposals#item-off-page');
+  state.itemRead.mockResolvedValue(target);
+  state.reads.mockResolvedValue({ ok: true, data: [{ ...target, title: 'Private pending version', status: '待審核' }] });
+  render(<ProposalsPage />);
+  const card = (await screen.findByText(target.title)).closest('[id^="item-"]');
+  if (!(card instanceof HTMLElement)) throw new TypeError('Missing public target');
+  // When the public endpoint no longer permits the item.
+  state.itemRead.mockResolvedValue(outcome === 'deleted' ? null : { ...target, status: '待審核' });
+  fireEvent.click(within(card).getByRole('button', { name: '重新載入最新資料' }));
+  // Then only the independently authorized pending section may keep its private row.
+  await waitFor(() => expect(card).not.toBeInTheDocument());
+  expect(screen.queryByText(target.title)).toBeNull();
+  expect(screen.getByText('Private pending version')).toBeVisible();
+  expect(state.itemRead).toHaveBeenCalledTimes(2);
+  expect(state.reads).toHaveBeenCalledTimes(1);
 });

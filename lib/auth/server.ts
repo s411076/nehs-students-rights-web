@@ -33,10 +33,9 @@ export async function getVerifiedIdentity(client?: SupabaseClient): Promise<Read
 export async function requireAdmin(client?: SupabaseClient): Promise<Readonly<SessionIdentity>> {
   const supabase = client ?? await createReadOnlyClient();
   const identity = await getVerifiedIdentity(supabase);
-  const { data, error } = await supabase.from('admins').select('email').eq('email', identity.email).limit(2)
-    .overrideTypes<{ email: unknown }[], { merge: false }>();
+  const { data, error } = await supabase.rpc('rights_is_admin');
   if (error) throw new AuthorizationError(503, 'role_unavailable');
-  if (!Array.isArray(data) || data.length !== 1 || !data[0] || data[0].email !== identity.email) {
+  if (data !== true) {
     throw new AuthorizationError(403, 'admin_required');
   }
   return { ...identity, isAdmin: true };

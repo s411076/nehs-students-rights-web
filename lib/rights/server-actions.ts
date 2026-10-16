@@ -2,101 +2,60 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { AuthorizationError, getVerifiedIdentity, requireAdmin } from '@/lib/auth/server';
-import { ADMIN_ACTIONS, makeFailure, makeSuccess, PUBLIC_STATUSES } from './contracts';
+import { ADMIN_ACTIONS, makeFailure, makeSuccess } from './contracts';
 import type { ResultCode, RightsActionRequest, RightsResult } from './contracts';
-import { fallbackFeedbackTitle, formatProposalTitle } from './validation';
+import { parseMutationReceipt, type MutationReceipt } from './receipts';
+export type { MutationReceipt } from './receipts';
 
-export type MutationReceipt = { readonly inserted: true } | { readonly id: string; readonly upvotes_count?: number };
 const STATUS: Record<ResultCode, number> = {
   INVALID_PAYLOAD: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, CONFLICT: 409,
   PAYLOAD_TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, UNAVAILABLE: 503,
 };
-
 export function rightsResponse<T>(result: RightsResult<T>) {
-  return NextResponse.json(result, {
-    status: result.ok ? 200 : STATUS[result.code], headers: { 'Cache-Control': 'private, no-store' },
-  });
+  return NextResponse.json(result, { status: result.ok ? 200 : STATUS[result.code], headers: { 'Cache-Control': 'private, no-store' } });
 }
-
 export function rightsException(error: unknown) {
   if (error instanceof AuthorizationError) {
     return makeFailure(error.status === 401 ? 'UNAUTHORIZED' : error.status === 403 ? 'FORBIDDEN' : 'UNAVAILABLE');
   }
   return makeFailure('UNAVAILABLE');
 }
-
-function returnedRow(data: unknown, expectedId: string, count?: number): RightsResult<MutationReceipt> {
-  if (!Array.isArray(data) || data.length !== 1) return makeFailure('CONFLICT');
-  const row: unknown = data[0];
-  if (typeof row !== 'object' || row === null || !('id' in row) || row.id !== expectedId) {
-    return makeFailure('UNAVAILABLE');
+export function rightsDatabaseFailure(error: { readonly code?: string }) {
+  switch (error.code) {
+    case 'PT400': case '22P02': case '22003': case '22007': case '22008': case '22023': case '23502': case '23514':
+      return makeFailure('INVALID_PAYLOAD');
+    case 'PT401': case 'PGRST301': case 'PGRST302': case 'PGRST303': return makeFailure('UNAUTHORIZED');
+    case 'PT403': case '42501': return makeFailure('FORBIDDEN');
+    case 'PT409': case '23503': case '23505': case '40001': case '40P01': return makeFailure('CONFLICT');
+    default: return makeFailure('UNAVAILABLE');
   }
-  if (count !== undefined) {
-    if (!('upvotes_count' in row) || row.upvotes_count !== count) return makeFailure('UNAVAILABLE');
-    return makeSuccess({ id: expectedId, upvotes_count: count });
-  }
-  return makeSuccess({ id: expectedId });
 }
 
-export async function executeRightsAction(client: SupabaseClient, request: RightsActionRequest): Promise<RightsResult<MutationReceipt>> {
-  const identity = ADMIN_ACTIONS.some(action => action === request.action)
-    ? await requireAdmin(client) : await getVerifiedIdentity(client);
-  const insert = async (table: 'proposals' | 'feedback' | 'proposal_comments' | 'home_sections', values: Record<string, unknown>) => {
-    const { error } = await client.from(table).insert(values);
-    return error ? makeFailure('UNAVAILABLE') : makeSuccess({ inserted: true } as const);
-  };
-  const update = async (table: 'proposals' | 'feedback', id: string, values: Record<string, unknown>) => {
-    const { data, error } = await client.from(table).update(values).eq('id', id).select('id');
-    return error ? makeFailure('UNAVAILABLE') : returnedRow(data, id);
-  };
-  const remove = async (table: 'proposals' | 'feedback' | 'home_sections' | 'proposal_comments', id: string, proposalId?: string) => {
-    const query = client.from(table).delete().eq('id', id);
-    const { data, error } = await (proposalId === undefined ? query : query.eq('proposal_id', proposalId)).select('id');
-    return error ? makeFailure('UNAVAILABLE') : returnedRow(data, id);
-  };
+export function actionRpc(request: RightsActionRequest) {
   switch (request.action) {
-    case 'createProposal': {
-      const title = formatProposalTitle(request.payload.title, request.payload.category);
-      if (!title.ok) return title;
-      return insert('proposals', { title: title.data, content: request.payload.content,
-        author_name: identity.displayName, status: '待審核', upvotes_count: 0 });
-    }
-    case 'createFeedback': {
-      const p = request.payload;
-      const title = fallbackFeedbackTitle(p.title, p.content);
-      return insert('feedback', { title, content: p.content, category: p.category,
-        is_anonymous: p.isAnonymous, author_name: p.isAnonymous ? '匿名學生' : identity.displayName });
-    }
-    case 'addComment': {
-      const p = request.payload;
-      const { data, error } = await client.from('proposals').select('id').eq('id', p.proposalId)
-        .in('status', [...PUBLIC_STATUSES]).limit(2);
-      if (error) return makeFailure('UNAVAILABLE');
-      const visible = returnedRow(data, p.proposalId);
-      if (!visible.ok) return visible;
-      return insert('proposal_comments', { proposal_id: p.proposalId, content: p.content,
-        author_name: p.isAnonymous ? '匿名學生' : identity.displayName });
-    }
-    case 'setVoteCount': {
-      const p = request.payload;
-      // Client-chosen totals retain duplicate-vote/lost-update risk; this is not an atomic vote ledger.
-      const { data, error } = await client.from('proposals').update({ upvotes_count: p.count })
-        .eq('id', p.proposalId).in('status', [...PUBLIC_STATUSES]).select('id,upvotes_count');
-      return error ? makeFailure('UNAVAILABLE') : returnedRow(data, p.proposalId, p.count);
-    }
-    case 'updateProposalControl':
-      return update('proposals', request.payload.id, { status: request.payload.status, reply: request.payload.reply });
-    case 'approveProposal': return update('proposals', request.payload.id, { status: '研議中' });
-    case 'rejectProposal': return update('proposals', request.payload.id, { status: '被退回' });
-    case 'deleteProposal': return remove('proposals', request.payload.id);
-    case 'deleteComment': return remove('proposal_comments', request.payload.id, request.payload.proposalId);
-    case 'saveFeedbackReply':
-      return update('feedback', request.payload.id, { reply: request.payload.reply, replied_at: new Date().toISOString() });
-    case 'deleteFeedback': return remove('feedback', request.payload.id);
-    case 'createHomeSection': return insert('home_sections', { title: request.payload.title, content: request.payload.content });
-    case 'deleteHomeSection': return remove('home_sections', request.payload.id);
+    case 'createProposal': return { name: 'rights_create_proposal', args: { p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category } };
+    case 'createFeedback': return { name: 'rights_create_feedback', args: { p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category, p_is_anonymous: request.payload.isAnonymous } };
+    case 'addComment': return { name: 'rights_add_comment', args: { p_proposal_id: request.payload.proposalId, p_content: request.payload.content, p_is_anonymous: request.payload.isAnonymous } };
+    case 'setVote': return { name: 'rights_set_vote', args: { p_proposal_id: request.payload.proposalId, p_voted: request.payload.voted } };
+    case 'updateProposalControl': return { name: 'rights_update_proposal_control', args: { p_id: request.payload.id, p_status: request.payload.status, p_reply: request.payload.reply, p_expected_version: request.payload.expectedVersion } };
+    case 'approveProposal': return { name: 'rights_approve_proposal', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
+    case 'rejectProposal': return { name: 'rights_reject_proposal', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
+    case 'deleteProposal': return { name: 'rights_delete_proposal', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
+    case 'deleteComment': return { name: 'rights_delete_comment', args: { p_id: request.payload.id, p_proposal_id: request.payload.proposalId, p_expected_version: request.payload.expectedVersion } };
+    case 'saveFeedbackReply': return { name: 'rights_save_feedback_reply', args: { p_id: request.payload.id, p_reply: request.payload.reply, p_expected_version: request.payload.expectedVersion } };
+    case 'deleteFeedback': return { name: 'rights_delete_feedback', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
+    case 'createHomeSection': return { name: 'rights_create_home_section', args: { p_title: request.payload.title, p_content: request.payload.content } };
+    case 'deleteHomeSection': return { name: 'rights_delete_home_section', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
     default: return assertNever(request);
   }
 }
-
+export async function executeRightsAction(client: SupabaseClient, request: RightsActionRequest): Promise<RightsResult<MutationReceipt>> {
+  if (ADMIN_ACTIONS.some(action => action === request.action)) await requireAdmin(client);
+  else await getVerifiedIdentity(client);
+  const rpc = actionRpc(request);
+  const { data, error } = await client.rpc(rpc.name, rpc.args);
+  if (error) return rightsDatabaseFailure(error);
+  const receipt = parseMutationReceipt(data, request);
+  return receipt ? makeSuccess(receipt) : makeFailure('UNAVAILABLE');
+}
 function assertNever(_value: never): never { throw new TypeError('Unknown rights action'); }

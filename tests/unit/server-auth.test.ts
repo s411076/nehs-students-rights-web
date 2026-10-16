@@ -77,12 +77,12 @@ test('rejects an aborted request before membership lookup', async () => {
   expect(fixture.data.requests.filter(request => request.path.startsWith('/rest/'))).toEqual([]);
 });
 
-test('verifies user first and reads only bounded own membership when admin is requested', async () => {
+test('verifies user before caller-only admin RPC when admin is requested', async () => {
   const { supabase } = createRouteHandlerClient(await sessionRequest(fixture.url, 'admin'));
   fixture.data.requests.length = 0;
   expect(await requireAdmin(supabase)).toMatchObject({ id: 'admin', isAdmin: true });
   expect(fixture.data.requests.map(request => request.path)).toEqual([
-    '/auth/v1/user', '/rest/v1/admins?select=email&email=eq.admin%40nehs.hc.edu.tw&limit=2',
+    '/auth/v1/user', '/rest/v1/rpc/rights_is_admin',
   ]);
 });
 
@@ -94,14 +94,14 @@ test('denies nonadmin before a guarded mutation can execute', async () => {
 });
 
 test.each([
-  { rows: [{ email: 'admin@nehs.hc.edu.tw' }, { email: 'admin@nehs.hc.edu.tw' }], status: 403 },
-  { rows: [{ email: 7 }], status: 403 },
-  { rows: [{ email: 'other@nehs.hc.edu.tw' }], status: 403 },
+  { rows: [{ email: 'admin@nehs.hc.edu.tw' }], status: 403 },
+  { rows: 'true', status: 403 },
+  { rows: false, status: 403 },
   { rows: null, status: 503 },
 ])('fails closed when membership is $rows', async ({ rows, status }) => {
   const request = await sessionRequest(fixture.url, 'admin');
   const original = globalThis.fetch;
-  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).includes('/rest/v1/admins')
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).includes('/rest/v1/rpc/rights_is_admin')
     ? Promise.resolve(rows === null ? Response.json({ message: 'role policy error' }, { status: 400 }) : Response.json(rows))
     : original(input, init));
   const { supabase } = createRouteHandlerClient(request);

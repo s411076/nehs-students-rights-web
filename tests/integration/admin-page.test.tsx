@@ -15,7 +15,6 @@ vi.mock('../../components/admin/AdminFeedbackPanel', () => ({ default: ({ feedba
   state.rows = feedback;
   return <div>{feedback.map(row => row.content).join(',')}</div>;
 } }));
-import { FEEDBACK_SELECT_STRING } from '../../lib/rights/queries';
 
 let fixture: Awaited<ReturnType<typeof startSupabaseFixture>>;
 beforeEach(async () => {
@@ -50,14 +49,15 @@ test('projects approved DTO only after verified admin guard', async () => {
   fixture.data.tables.feedback[0].secret = 'PRIVATE_SECRET';
   expect(await page()).toContain('Fixture suggestion');
   expect(state.rows).toEqual([{ id: 'feedback-1', title: 'Fixture feedback', content: 'Fixture suggestion', category: '其他',
-    is_anonymous: true, author_name: 'ANONYMOUS_AUTHOR_SENTINEL', reply: '', replied_at: null, created_at: '2026-01-01T00:00:00Z' }]);
+    is_anonymous: true, reply: '', replied_at: null, created_at: '2026-01-01T00:00:00Z', version: 1 }]);
   expect(fixture.data.requests[0].path).toBe('/auth/v1/user');
-  expect(new URL(fixture.data.requests[2].path, fixture.url).searchParams.get('select')).toBe(FEEDBACK_SELECT_STRING);
+  expect(fixture.data.requests.some(request => request.path === '/rest/v1/rpc/rights_list_admin_feedback')).toBe(true);
+  expect(JSON.stringify(state.rows)).not.toContain('ANONYMOUS_AUTHOR_SENTINEL');
 });
-test.each(['admins', 'feedback'])('renders controlled unavailable UI when %s upstream fails', async table => {
+test.each(['rights_is_admin', 'rights_list_admin_feedback'])('renders controlled unavailable UI when %s upstream fails', async table => {
   await seed('admin');
   const fetch = globalThis.fetch;
-  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).includes(`/rest/v1/${table}`)
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).includes(`/rest/v1/rpc/${table}`)
     ? Promise.resolve(Response.json({ message: 'TOKEN_SECRET' }, { status: 400 })) : fetch(input, init));
   const html = await page();
   expect(html).toContain('role="alert"');

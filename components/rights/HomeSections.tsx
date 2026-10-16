@@ -7,6 +7,7 @@ import { validateBody, validateRawTitle } from '@/lib/rights/validation';
 import { useRightsPage } from './useRightsPage';
 import { useRightsMutation } from './useRightsMutation';
 import { PageContinuation } from './PageContinuation';
+import { Trash2 } from 'lucide-react';
 import { ActionFeedback } from './ActionFeedback';
 
 export function HomeSections() {
@@ -55,7 +56,7 @@ export function HomeSections() {
           void mutation.run({ action: 'deleteHomeSection', payload: { id: section.id, expectedVersion: section.version } }).then(result => {
             if (result?.ok) { sections.remove(section.id); mutation.setNotice('已刪除首頁欄位。'); }
           });
-        }} className="absolute top-4 right-4 min-h-11 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded font-bold">🗑️ 刪除</button>}
+        }} className="absolute top-4 right-4 min-h-11 bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 text-xs px-2.5 py-1 rounded font-bold flex items-center gap-1"><Trash2 aria-hidden="true" size={14} className="shrink-0" /> 刪除</button>}
         <h2 className={`text-xl font-bold mb-2 break-words ${isAdmin ? 'pr-20' : ''}`}>{section.title}</h2>
         <p className="text-gray-700 dark:text-slate-300 text-sm whitespace-pre-line leading-relaxed">{section.content}</p>
       </div>)}

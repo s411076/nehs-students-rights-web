@@ -5,6 +5,7 @@ import type { ProposalDTO } from '@/lib/rights/queries';
 import { useRightsMutation } from '@/components/rights/useRightsMutation';
 import { ActionFeedback } from '@/components/rights/ActionFeedback';
 import { AuthorReveal } from '@/components/admin/AuthorReveal';
+import { Trash2 } from 'lucide-react';
 import { ProposalVote } from './ProposalVote';
 import { ProposalControl } from './ProposalControl';
 import { ProposalComments } from './ProposalComments';
@@ -25,7 +26,7 @@ export function ProposalCard({ item, refresh, remove }: CardProps) {
         if (!window.confirm('⚠️ 確定要刪除這條提案嗎？刪除後將無法復原！')) return;
         void mutation.run({ action: 'deleteProposal', payload: { id: item.id, expectedVersion: item.version } })
           .then(result => { if (result?.ok) remove(item.id); });
-      }} className="min-h-11 text-xs px-2.5 py-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 font-medium rounded-lg border border-red-200 dark:border-slate-700 transition flex items-center gap-1">🗑️ 刪除</button>}
+      }} className="min-h-11 text-xs px-2.5 py-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 font-medium rounded-lg border border-red-200 dark:border-slate-700 transition flex items-center gap-1"><Trash2 aria-hidden="true" size={14} className="shrink-0" /> 刪除</button>}
     </div>
     <div>
       <h3 className="text-lg font-bold text-gray-900 dark:text-slate-200 break-words">{item.title}</h3>

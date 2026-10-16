@@ -6,6 +6,7 @@ import { useRightsMutation } from '@/components/rights/useRightsMutation';
 import { ActionFeedback } from '@/components/rights/ActionFeedback';
 import { FeedbackReplyEditor } from '@/components/rights/FeedbackReplyEditor';
 import { AuthorReveal } from '@/components/admin/AuthorReveal';
+import { Trash2 } from 'lucide-react';
 import { InlineSpinner } from '@/components/rights/InlineSpinner';
 
 type CardProps = { readonly item: FeedbackPublicDTO; readonly refresh: () => Promise<unknown>; readonly remove: (id: string) => void };
@@ -26,7 +27,7 @@ export function FeedbackCard({ item, refresh, remove }: CardProps) {
         void mutation.run({ action: 'deleteFeedback', payload: { id: item.id, expectedVersion: item.version } })
           .then(result => { if (result?.ok) remove(item.id); });
       }} className="min-h-11 text-xs px-2.5 py-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 font-medium rounded-lg border border-red-200 dark:border-slate-700 transition disabled:opacity-50 flex items-center gap-1">
-        {mutation.busy && <InlineSpinner />} 🗑️ {mutation.busy ? '刪除中...' : '刪除建言'}
+        {mutation.busy && <InlineSpinner />} <Trash2 aria-hidden="true" size={14} className="shrink-0" /> {mutation.busy ? '刪除中...' : '刪除建言'}
       </button>}
     </div>
     {item.title && <h3 className="text-base font-bold text-gray-900 dark:text-slate-200 break-words">{item.title}</h3>}

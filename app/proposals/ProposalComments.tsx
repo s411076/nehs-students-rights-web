@@ -7,6 +7,7 @@ import { useRightsPage } from '@/components/rights/useRightsPage';
 import { useRightsMutation } from '@/components/rights/useRightsMutation';
 import { PageContinuation } from '@/components/rights/PageContinuation';
 import { ActionFeedback } from '@/components/rights/ActionFeedback';
+import { MessageSquareText } from 'lucide-react';
 import { AuthorReveal } from '@/components/admin/AuthorReveal';
 import { useProposalCommentDraft } from '@/components/rights/RightsDraftProvider';
 
@@ -24,7 +25,7 @@ export function ProposalComments({ item }: { readonly item: ProposalDTO }) {
     if (result?.ok) comments.remove(comment.id);
   };
   return <div className="space-y-3 pt-1">
-    <div className="text-xs font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1">💬 討論與留言（已載入 {rows.length} 筆）</div>
+    <div className="text-xs font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1"><MessageSquareText aria-hidden="true" size={14} className="shrink-0" /> 討論與留言（已載入 {rows.length} 筆）</div>
     <ActionFeedback error={mutation.error} notice={mutation.notice} />
     {mutation.error && <button type="button" onClick={() => void comments.refresh()}
       className="min-h-11 text-sm font-semibold underline text-blue-700 dark:text-blue-300 rounded focus-visible:ring-2 focus-visible:ring-blue-500">更新留言清單</button>}

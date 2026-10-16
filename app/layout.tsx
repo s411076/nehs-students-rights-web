@@ -22,6 +22,9 @@ export default function RootLayout({
         <AuthProvider>
           <Navbar />
           {children}
+          <footer className="max-w-4xl mx-auto px-6 pb-10 pt-4 text-center">
+            <p className="text-xs text-gray-500 dark:text-slate-400">© 2026 NESHNESC 竹科實中學聯會・學生權益網</p>
+          </footer>
         </AuthProvider>
       </body>
     </html>

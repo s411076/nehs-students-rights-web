@@ -1,6 +1,7 @@
 ﻿'use client'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { House, Lightbulb, MessageSquareText, User, Wrench, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { useAuth, useLogoutNotice } from '@/components/AuthProvider'
 
@@ -97,7 +98,7 @@ export default function Navbar() {
             </button>
 
             <Link className="min-w-0 truncate font-extrabold text-lg tracking-tight text-inherit" href="/">
-              🎓 竹科實中學權組
+              竹科實中學權組
             </Link>
           </div>
 
@@ -158,7 +159,7 @@ export default function Navbar() {
         <div className="shrink-0">
           <div className="p-5 border-b dark:border-slate-800 flex justify-between items-center">
             <span className="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
-              🎓 導覽選單
+              導覽選單
             </span>
             <button
               type="button"
@@ -167,7 +168,7 @@ export default function Navbar() {
               aria-label="關閉側邊選單"
               className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color]"
             >
-              ✕
+              <X aria-hidden="true" size={18} className="shrink-0" />
             </button>
           </div>
 
@@ -175,21 +176,21 @@ export default function Navbar() {
             <Link href="/" onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
             >
-              <span className="text-lg">🏠</span>
+              <House aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">首頁</span>
             </Link>
 
             <Link href="/feedback" onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
             >
-              <span className="text-lg">💬</span>
+              <MessageSquareText aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">回饋與建言</span>
             </Link>
 
             <Link href="/proposals" onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
             >
-              <span className="text-lg">💡</span>
+              <Lightbulb aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">學生提案</span>
             </Link>
 
@@ -197,7 +198,7 @@ export default function Navbar() {
               <Link href="/profile" onClick={() => setIsOpen(false)}
                 className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
               >
-                <span className="text-lg">👤</span>
+                <User aria-hidden="true" size={18} className="shrink-0" />
                 <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">個人資料</span>
               </Link>
             )}
@@ -206,7 +207,7 @@ export default function Navbar() {
               <Link href="/admin" onClick={() => setIsOpen(false)}
                 className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
               >
-                <span className="text-lg">🛠️</span>
+                <Wrench aria-hidden="true" size={18} className="shrink-0" />
                 <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">管理後台</span>
               </Link>
             )}

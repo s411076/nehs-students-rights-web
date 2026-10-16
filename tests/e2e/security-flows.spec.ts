@@ -1,4 +1,6 @@
 import { test, expect, appURL, login, forgedCookies, post, state, control, capture } from '../fixtures/security-flow';
+
+test.use({ baseURL: appURL, trace: 'off' });
 import { moderation, delayedLogout } from '../fixtures/security-operations';
 
 const privileged = [

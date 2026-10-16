@@ -7,6 +7,7 @@ import { useRightsPage } from '@/components/rights/useRightsPage';
 import { usePublicItemLink } from '@/components/rights/usePublicItemLink';
 import { PageContinuation } from '@/components/rights/PageContinuation';
 import { ProposalCard } from './ProposalCard';
+import { Lightbulb } from 'lucide-react';
 import { ProposalComposer } from './ProposalComposer';
 import { PendingProposal } from './PendingProposal';
 import { RightsDraftProvider, useForgetItemDrafts } from '@/components/rights/RightsDraftProvider';
@@ -37,7 +38,7 @@ function ProposalsContent() {
   return <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-200 flex items-center gap-2">💡 學生提案區</h1>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-200 flex items-center gap-2"><Lightbulb aria-hidden="true" size={18} className="shrink-0" /> 學生提案區</h1>
         <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">發起關於校園生活與權益的提案，獲得同學支持與學權組關注！</p>
       </div>
       {isAdmin && <div className="shrink-0 self-start sm:self-center"><span className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs font-semibold rounded-full border border-purple-200 dark:border-slate-700">🔑 您目前為學權組管理員</span></div>}

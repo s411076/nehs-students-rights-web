@@ -14,11 +14,11 @@ export function PendingProposal({ item, refresh }: { readonly item: ProposalDTO;
   return <div id={`item-${item.id}`} className="scroll-mt-20 p-4 bg-white dark:bg-slate-800 rounded-xl border border-amber-200 dark:border-slate-700 shadow-sm space-y-2">
     <div className="flex items-center justify-between">
       <span className="px-2.5 py-0.5 bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-xs font-semibold rounded-full">待審核</span>
-      <span className="text-xs text-gray-400 dark:text-slate-400">{new Date(item.created_at).toLocaleDateString()}</span>
+      <span className="text-xs text-gray-500 dark:text-slate-400">{new Date(item.created_at).toLocaleDateString()}</span>
     </div>
     <h3 className="text-base font-bold text-gray-900 dark:text-slate-200">{item.title}</h3>
     <p className="text-sm text-gray-700 dark:text-slate-300 whitespace-pre-line">{item.content}</p>
-    <div className="text-xs text-gray-400 dark:text-slate-400">提案人：{item.author_name || '學生'}</div>
+    <div className="text-xs text-gray-500 dark:text-slate-400">提案人：{item.author_name || '學生'}</div>
     <AuthorReveal kind="proposal" id={item.id} />
     <ActionFeedback error={mutation.error} notice={mutation.notice} />
     {mutation.error && <button type="button" onClick={() => void refresh()} className="min-h-11 text-sm underline text-blue-700 dark:text-blue-300">重新載入最新資料</button>}

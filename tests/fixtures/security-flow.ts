@@ -95,5 +95,4 @@ export const test = base.extend<{ networkAudit: void }>({
     }
   }, { auto: true }],
 });
-test.use({ baseURL: appURL, browserName: 'chromium', trace: 'off' });
 export { expect };

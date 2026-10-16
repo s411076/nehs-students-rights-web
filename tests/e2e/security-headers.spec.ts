@@ -1,4 +1,6 @@
-import { test, expect, login } from '../fixtures/security-flow';
+import { test, expect, login, appURL } from '../fixtures/security-flow';
+
+test.use({ baseURL: appURL, trace: 'off' });
 
 const EXPECTED_CSP = "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'";
 

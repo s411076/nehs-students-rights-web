@@ -1,5 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { act } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import HomePage from '../../app/page';
 import { AuthProvider } from '../../components/AuthProvider';
@@ -85,6 +84,19 @@ const authState = vi.hoisted(() => ({
 }));
 const nav = vi.hoisted(() => ({ push: vi.fn() }));
 
+function motionPreference(matches = false) {
+  const events = new EventTarget();
+  const query = {
+    matches,
+    media: '(prefers-reduced-motion: reduce)',
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events),
+  };
+  vi.stubGlobal('matchMedia', vi.fn(() => query));
+  return query;
+}
+
 vi.mock('../../components/AuthProvider', async importOriginal => {
   const actual = await importOriginal<typeof import('../../components/AuthProvider')>();
   return { ...actual, useAuth: () => authState.real ? actual.useAuth() : authState.value };
@@ -138,6 +150,7 @@ function rightsBody(body: { ok: boolean; code?: string; data?: unknown }) {
 }
 
 beforeEach(() => {
+  motionPreference();
   asAnonymous(0);
   authState.real = false;
   sdk.store.listener = undefined;
@@ -155,6 +168,7 @@ beforeEach(() => {
   nav.push.mockClear();
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -241,8 +255,8 @@ test('publishes an announcement once as admin and refreshes the list after confi
   // When publishing (double click proves the pending guard)
   render(<HomePage />);
   expect(await screen.findByText('開學公告')).toBeInTheDocument();
-  fireEvent.change(screen.getByPlaceholderText('欄位標題...'), { target: { value: '新公告' } });
-  fireEvent.change(screen.getByPlaceholderText('欄位內容與公告細節...'), { target: { value: '這是新公告內容' } });
+  fireEvent.change(screen.getByLabelText('欄位標題'), { target: { value: '新公告' } });
+  fireEvent.change(screen.getByLabelText('欄位內容與公告細節'), { target: { value: '這是新公告內容' } });
   const publish = screen.getByRole('button', { name: /發布到首頁/ });
   fireEvent.click(publish);
   fireEvent.click(publish);
@@ -359,10 +373,110 @@ test('preserves the public search UI for signed-out visitors', async () => {
   );
   // When opening the home page
   render(<HomePage />);
-  // Then login choices and the full-site search box remain
-  expect(await screen.findByText(/請選擇身分登入系統/)).toBeInTheDocument();
+  // Then one login entry and the full-site search box remain
+  expect(await screen.findAllByRole('button', { name: /登入/ })).toHaveLength(1);
   fireEvent.change(screen.getByPlaceholderText(/輸入關鍵字搜尋/), { target: { value: '鞦韆' } });
   expect(await screen.findByText('鞦韆整修提案')).toBeInTheDocument();
+});
+
+test('starts school-hinted Google OAuth from the single login entry', async () => {
+  // Given a signed-out visitor on the home page
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  render(<HomePage />);
+  // When using the shared school-account login entry
+  fireEvent.click(screen.getByRole('button', { name: /以學校帳號登入/ }));
+  // Then the same Google provider, current-origin redirect and domain hint are used
+  await waitFor(() => expect(sdk.client.auth.signInWithOAuth).toHaveBeenCalledExactlyOnceWith({
+    provider: 'google',
+    options: { redirectTo: window.location.origin, queryParams: { hd: 'nehs.hc.edu.tw' } },
+  }));
+});
+
+test('keeps the single login entry locked while OAuth is starting and awaiting navigation', async () => {
+  // Given an OAuth start that remains pending until the provider responds
+  let finishOAuth: (value: unknown) => void = () => { throw new Error('Missing OAuth start'); };
+  sdk.client.auth.signInWithOAuth.mockImplementation(() => new Promise(resolve => { finishOAuth = resolve; }));
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  render(<HomePage />);
+  const login = screen.getByRole('button', { name: /以學校帳號登入/ });
+  // When a visitor tries to start OAuth twice
+  fireEvent.click(login);
+  fireEvent.click(login);
+  // Then pending feedback replaces the label and prevents a duplicate start
+  expect(screen.getByRole('button', { name: /登入中/ })).toBeDisabled();
+  expect(sdk.client.auth.signInWithOAuth).toHaveBeenCalledTimes(1);
+  await act(async () => { finishOAuth({ data: {}, error: null }); });
+  expect(login).toBeDisabled();
+});
+
+test.each([true, false])('stops login movement when reduced motion is %s at mount or enabled later', async reducedAtMount => {
+  // Given the system motion preference and a signed-out visitor
+  vi.useFakeTimers();
+  const preference = motionPreference(reducedAtMount);
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  await act(async () => { render(<HomePage />); });
+  const login = screen.getByRole('button', { name: /以學校帳號登入/ });
+  if (!reducedAtMount) {
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(login.style.transform).not.toBe('translate(0px, 0px)');
+  }
+  // When reduced motion applies, including a live system-preference change
+  act(() => {
+    preference.matches = true;
+    preference.dispatchEvent(new Event('change'));
+    vi.advanceTimersByTime(100);
+  });
+  // Then the button is stationary and its interval is stopped
+  expect(login).toHaveStyle({ transform: 'translate(0px, 0px)' });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test('names the public search field and exposes results as focusable item deep-links', async () => {
+  // Given public proposals and feedback matching the same keyword
+  sdk.store.tables.proposals = [publicProposal()];
+  stubFetch(() => rightsBody({ ok: true, data: [{ ...namedFeedback(), title: '鞦韆建言' }] }));
+  render(<HomePage />);
+  // When searching through the visibly labelled field
+  fireEvent.change(screen.getByRole('textbox', { name: /搜尋全站提案、建言與留言/ }), { target: { value: '鞦韆' } });
+  // Then native links retain both destinations and accept keyboard focus
+  const proposal = await screen.findByRole('link', { name: /鞦韆整修提案/ });
+  const feedback = await screen.findByRole('link', { name: /鞦韆建言/ });
+  expect(proposal).toHaveAttribute('href', '/proposals#item-p-1');
+  expect(feedback).toHaveAttribute('href', '/feedback#item-f-1');
+  proposal.focus();
+  expect(proposal).toHaveFocus();
+  feedback.focus();
+  expect(feedback).toHaveFocus();
+});
+
+test('retries an unavailable identity service without presenting an anonymous login card', async () => {
+  // Given an unavailable identity check and a narrow reload stub
+  authState.value.status = 'unavailable';
+  const reload = vi.fn();
+  const location = { ...window.location, reload };
+  vi.stubGlobal('window', new Proxy(window, {
+    get: (target, key) => key === 'location' ? location : Reflect.get(target, key, target),
+  }));
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  render(<HomePage />);
+  expect(screen.getByRole('alert')).toHaveTextContent(/登入服務暫時無法使用/);
+  expect(screen.queryByRole('button', { name: /以學校帳號登入/ })).toBeNull();
+  // When the visitor retries service verification
+  fireEvent.click(screen.getByRole('button', { name: /重試身分驗證/ }));
+  // Then a single full reload delegates identity verification to the existing provider
+  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+});
+
+test('explains an ineligible identity separately from login failure without an OAuth return', async () => {
+  // Given a provider-rejected identity with no OAuth result parameters
+  authState.value.status = 'ineligible';
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  // When the home page opens
+  render(<HomePage />);
+  // Then the eligibility reason is visible and a school-account retry remains available
+  expect(screen.getByRole('alert')).toHaveTextContent(/登入資格不符/);
+  expect(screen.queryByText(/登入失敗/)).toBeNull();
+  expect(screen.getAllByRole('button', { name: /以學校帳號登入/ })).toHaveLength(1);
 });
 
 test.each([
@@ -371,7 +485,7 @@ test.each([
   { name: 'missing code/session', search: '', user: null, status: 'anonymous', message: /登入失敗/ },
   { name: 'outside identity', search: '?code=outside', user: { email: 'x@example.com', email_confirmed_at: 'now' }, status: 'ineligible', message: /登入資格不符/ },
   { name: 'unconfirmed identity', search: '?code=unconfirmed', user: { email: 'x@nehs.hc.edu.tw', email_confirmed_at: null }, status: 'ineligible', message: /登入資格不符/ },
-  { name: 'transport failure', search: '?code=offline', user: null, status: 'unavailable', message: /登入失敗/ },
+  { name: 'transport failure', search: '?code=offline', user: null, status: 'unavailable', message: /登入服務暫時無法使用/ },
 ])('root reports $name after consuming the return and preserves unrelated URL state', async scenario => {
   window.history.replaceState(null, '', `/${scenario.search}${scenario.search ? '&' : '?'}keep=yes#section`);
   sessionStorage.setItem('just_logged_in', 'true');
@@ -396,8 +510,9 @@ test.each(['rejection', 'error result'])('root observes OAuth start %s instead o
   if (scenario === 'rejection') sdk.client.auth.signInWithOAuth.mockRejectedValue(new TypeError('offline'));
   else sdk.client.auth.signInWithOAuth.mockResolvedValue({ error: new Error('denied') });
   render(<HomePage />);
-  fireEvent.click(screen.getByText(/學生登入/));
+  fireEvent.click(screen.getByRole('button', { name: /以學校帳號登入/ }));
   expect(await screen.findByText(/登入失敗/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /以學校帳號登入/ })).toBeEnabled();
   expect(sessionStorage.getItem('just_logged_in')).toBeNull();
 });
 

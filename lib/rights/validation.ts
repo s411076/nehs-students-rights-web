@@ -131,6 +131,23 @@ export function validateFeedbackTitle(value: unknown): RightsResult<string> {
 }
 
 /**
+ * Code-point-safe truncation: Array.from splits by Unicode code point so
+ * surrogate pairs (e.g. 🏫) are never cut into lone surrogates.
+ */
+export function truncateToCodePoints(value: string, max: number): string {
+  return Array.from(value).slice(0, max).join('');
+}
+
+/**
+ * Feedback fallback title: a provided (already trimmed) title wins;
+ * otherwise derive from content with code-point-safe truncation.
+ */
+export function fallbackFeedbackTitle(title: string, content: string, max = 15): string {
+  if (title !== '') return title;
+  return Array.from(content).length > max ? `${truncateToCodePoints(content, max)}...` : content;
+}
+
+/**
  * Preserves the existing raw proposal prefix rule (`[category] raw` unless
  * the raw title already starts with `[`) and validates the final title too.
  */

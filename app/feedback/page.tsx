@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { PROPOSAL_CATEGORIES, RIGHTS_FEEDBACK_PATH } from "@/lib/rights/contracts";
 import type { FeedbackPublicDTO } from "@/lib/rights/queries";
@@ -71,7 +71,7 @@ function parseFeedbackList(data: unknown): FeedbackPublicDTO[] {
 type ListStatus = "loading" | "ready" | "error";
 
 export default function FeedbackPage() {
-  const { isAdmin, isLoggedIn } = useAuth();
+  const { isAdmin, isLoggedIn, status: authStatus } = useAuth();
 
   const [feedbackList, setFeedbackList] = useState<FeedbackPublicDTO[]>([]);
   const [listStatus, setListStatus] = useState<ListStatus>("loading");
@@ -84,6 +84,7 @@ export default function FeedbackPage() {
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const scrolledHash = useRef("");
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -93,7 +94,7 @@ export default function FeedbackPage() {
   const deleteFlight = useMemo(() => createRightsActionFlight(), []);
 
   const loadFeedback = useCallback(async () => {
-    setListStatus("loading");
+    setListStatus(current => current === "ready" ? current : "loading");
     const result = await readRights(RIGHTS_FEEDBACK_PATH, parseFeedbackList);
     if (!result.ok) {
       setListStatus("error");
@@ -104,7 +105,7 @@ export default function FeedbackPage() {
     result.data.forEach((item) => {
       initialReplies[item.id] = item.reply || "";
     });
-    setReplyInputs(initialReplies);
+    setReplyInputs(current => ({ ...initialReplies, ...current }));
     setListStatus("ready");
     return result;
   }, []);
@@ -112,6 +113,14 @@ export default function FeedbackPage() {
   useEffect(() => {
     void loadFeedback();
   }, [loadFeedback]);
+
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    const hash = window.location.hash;
+    if (hash === scrolledHash.current || !feedbackList.some(item => hash === `#item-${item.id}`)) return;
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" });
+    scrolledHash.current = hash;
+  }, [feedbackList, authStatus]);
 
   const clearFeedback = () => {
     setActionError(null);
@@ -224,19 +233,19 @@ export default function FeedbackPage() {
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
       {/* 標題與管理員標籤 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-200 flex items-center gap-2">
             💬 回饋與建言
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
             歡迎向竹科實中學權組提出您的寶貴意見或學校生活中的問題！
           </p>
         </div>
 
         {isAdmin && (
           <div className="shrink-0 self-start sm:self-center">
-            <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200">
+            <span className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs font-semibold rounded-full flex items-center gap-1 border border-purple-200 dark:border-slate-700">
               🔑 您目前為學權組管理員
             </span>
           </div>
@@ -244,23 +253,23 @@ export default function FeedbackPage() {
       </div>
 
       {actionError && (
-        <p role="alert" className="p-3.5 bg-red-50 rounded-2xl text-center text-sm font-semibold text-red-600 shadow-sm border border-red-200">
+        <p role="alert" className="p-3.5 bg-red-50 dark:bg-red-950/50 rounded-2xl text-center text-sm font-semibold text-red-600 dark:text-red-400 shadow-sm border border-red-200 dark:border-slate-800">
           {actionError}
         </p>
       )}
       {actionNotice && (
-        <p role="status" className="p-3.5 bg-green-50 rounded-2xl text-center text-sm font-semibold text-green-700 shadow-sm border border-green-200">
+        <p role="status" className="p-3.5 bg-green-50 dark:bg-green-950/50 rounded-2xl text-center text-sm font-semibold text-green-700 dark:text-green-300 shadow-sm border border-green-200 dark:border-slate-800">
           {actionNotice}
         </p>
       )}
 
       {/* 發表建言區塊：已登入顯示表單；未登入顯示灰色圓角提示條 */}
       {isLoggedIn ? (
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label htmlFor="feedback-title" className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="feedback-title" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                   建言標題
                 </label>
                 <input
@@ -269,19 +278,19 @@ export default function FeedbackPage() {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="例如：關於圖書館開館時間建議..."
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label htmlFor="feedback-category" className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="feedback-category" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                   分類
                 </label>
                 <select
                   id="feedback-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {PROPOSAL_CATEGORIES.map((option) => (
                     <option key={option} value={option}>
@@ -293,7 +302,7 @@ export default function FeedbackPage() {
             </div>
 
             <div>
-              <label htmlFor="feedback-content" className="block text-sm font-semibold text-gray-700 mb-1">
+              <label htmlFor="feedback-content" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                 寶貴意見內容
               </label>
               <textarea
@@ -302,13 +311,13 @@ export default function FeedbackPage() {
                 onChange={(e) => setContent(e.target.value)}
                 rows={4}
                 placeholder="請詳細說明您的想法或建議..."
-                className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                className="w-full p-3 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
                 required
               />
             </div>
 
             <div className="flex items-center justify-between pt-2">
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={isAnonymous}
@@ -329,7 +338,7 @@ export default function FeedbackPage() {
           </form>
         </div>
       ) : (
-        <div className="p-3.5 bg-gray-100/90 rounded-2xl text-center text-sm font-semibold text-gray-500 shadow-sm flex items-center justify-center gap-1.5 border border-gray-200/50">
+        <div className="p-3.5 bg-gray-100/90 dark:bg-slate-800/80 rounded-2xl text-center text-sm font-semibold text-gray-500 dark:text-slate-400 shadow-sm flex items-center justify-center gap-1.5 border border-gray-200/50 dark:border-slate-700">
           🔒 請登入後即可發表建言
         </div>
       )}
@@ -340,13 +349,21 @@ export default function FeedbackPage() {
           近期建言與官方回應
         </h2>
 
-        {listStatus === "loading" ? (
-          <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
+        {listStatus === "error" && feedbackList.length > 0 && (
+          <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-red-600 dark:text-red-400">
+            <p>無法更新建言，已保留目前清單與回覆草稿。</p>
+            <button type="button" onClick={() => void loadFeedback()} className="font-semibold underline text-blue-700 dark:text-blue-400">
+              重新載入
+            </button>
+          </div>
+        )}
+        {listStatus === "loading" && feedbackList.length === 0 ? (
+          <p className="text-gray-500 dark:text-slate-400 text-center py-10 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800">
             建言載入中…
           </p>
-        ) : listStatus === "error" ? (
-          <div className="text-center py-10 bg-white rounded-2xl border border-gray-200 space-y-3">
-            <p className="text-gray-500">
+        ) : listStatus === "error" && feedbackList.length === 0 ? (
+          <div className="text-center py-10 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 space-y-3">
+            <p className="text-gray-500 dark:text-slate-400">
               無法載入建言，請稍後再試。
             </p>
             <button
@@ -358,21 +375,23 @@ export default function FeedbackPage() {
             </button>
           </div>
         ) : feedbackList.length === 0 ? (
-          <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
+          <p className="text-gray-500 dark:text-slate-400 text-center py-10 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800">
             目前尚無意見回饋。
           </p>
         ) : (
           feedbackList.map((item) => (
             <div
               key={item.id}
-              className="p-5 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-3 relative"
+              id={`item-${item.id}`}
+              aria-busy={savingId === item.id || deletingId === item.id}
+              className="scroll-mt-20 p-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-3 relative"
             >
-              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800">
                 <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full border border-blue-100">
+                  <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-semibold rounded-full border border-blue-100 dark:border-slate-700">
                     {item.category || "其他"}
                   </span>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-gray-400 dark:text-slate-400">
                     {item.created_at
                       ? new Date(item.created_at).toLocaleDateString()
                       : ""}
@@ -384,68 +403,71 @@ export default function FeedbackPage() {
                     type="button"
                     onClick={() => handleDeleteFeedback(item.id)}
                     disabled={deletingId === item.id}
-                    className="text-xs px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg border border-red-200 transition disabled:opacity-50 flex items-center gap-1"
+                    className="text-xs px-2.5 py-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 font-medium rounded-lg border border-red-200 dark:border-slate-700 transition disabled:opacity-50 flex items-center gap-1"
                   >
+                    {deletingId === item.id && <InlineSpinner />}
                     🗑️ {deletingId === item.id ? "刪除中..." : "刪除建言"}
                   </button>
                 )}
               </div>
 
               {item.title && (
-                <h3 className="text-base font-bold text-gray-900">
+                <h3 className="text-base font-bold text-gray-900 dark:text-slate-200">
                   {item.title}
                 </h3>
               )}
-              <p className="text-gray-800 whitespace-pre-line text-sm leading-relaxed">
+              <p className="text-gray-800 dark:text-slate-300 whitespace-pre-line text-sm leading-relaxed">
                 {item.content}
               </p>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-gray-400 dark:text-slate-400">
                 — {item.is_anonymous ? "匿名學生" : (item.author_name ?? "匿名學生")}
               </div>
 
               {item.reply && (
-                <div className="p-4 bg-blue-50/80 border-l-4 border-blue-600 rounded-r-xl space-y-1 mt-2">
-                  <div className="font-bold text-blue-900 flex items-center justify-between text-xs">
+                <div className="p-4 bg-blue-50/80 dark:bg-blue-950/50 rounded-xl space-y-1 mt-2">
+                  <div className="font-bold text-blue-900 dark:text-blue-300 flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1">
                       📢 學權組官方回覆：
                     </span>
                     {item.replied_at && (
-                      <span className="text-xs text-blue-600 font-normal">
+                      <span className="text-xs text-blue-600 dark:text-blue-400 font-normal">
                         {new Date(item.replied_at).toLocaleDateString()}
                       </span>
                     )}
                   </div>
-                  <p className="text-blue-950 text-sm whitespace-pre-line">
+                  <p className="text-blue-950 dark:text-slate-200 text-sm whitespace-pre-line">
                     {item.reply}
                   </p>
                 </div>
               )}
 
               {isAdmin && (
-                <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
-                  <div className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                <div className="p-4 bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200 dark:border-slate-700 rounded-xl space-y-3 mt-3">
+                  <label htmlFor={`feedback-reply-${item.id}`} className="text-xs font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1">
                     ✏️ 學權組管理員回覆區：
-                  </div>
+                  </label>
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <input
+                      id={`feedback-reply-${item.id}`}
                       type="text"
                       value={replyInputs[item.id] || ""}
                       onChange={(e) =>
-                        setReplyInputs({
-                          ...replyInputs,
+                        setReplyInputs(current => ({
+                          ...current,
                           [item.id]: e.target.value,
-                        })
+                        }))
                       }
                       placeholder="請在此輸入官方回應內容..."
                       aria-label={`回覆「${item.title || item.content.slice(0, 10)}」`}
-                      className="flex-1 p-2.5 border border-purple-300 rounded-xl bg-white text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      className="min-w-0 flex-1 p-2.5 border border-purple-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
                       type="button"
                       onClick={() => handleSaveReply(item.id)}
                       disabled={savingId === item.id}
-                      className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"
+                      className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm inline-flex items-center justify-center gap-1.5"
                     >
+                      {savingId === item.id && <InlineSpinner />}
                       {savingId === item.id ? "發布中..." : "💾 發布官方回覆"}
                     </button>
                   </div>
@@ -457,4 +479,11 @@ export default function FeedbackPage() {
       </div>
     </main>
   );
+}
+
+function InlineSpinner() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="size-3.5 animate-spin motion-reduce:animate-pulse">
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+    <path d="M12 3a9 9 0 0 1 9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>;
 }

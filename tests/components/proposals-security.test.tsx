@@ -145,7 +145,7 @@ test.each([
   ['rejectProposal', '❌ 退回提案', { id: 'pending' }],
   ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply' }],
   ['deleteProposal', '🗑️ 刪除', { id: 'p1' }],
-  ['deleteComment', '✕', { id: 'c1', proposalId: 'p1' }],
+  ['deleteComment', /刪除留言/, { id: 'c1', proposalId: 'p1' }],
 ] as const)('routes admin %s through the allowlisted helper', async (action, button, payload) => {
   // Given
   verified(true); render(<ProposalsPage />);
@@ -174,7 +174,7 @@ test('reports deleteComment rejection without removing the displayed comment', a
   verified(true); state.requests.mockResolvedValue({ ok: false, code: 'FORBIDDEN', message: 'Comment deletion denied' });
   render(<ProposalsPage />); await screen.findByText('Existing comment');
   // When
-  fireEvent.click(screen.getByRole('button', { name: '✕' }));
+  fireEvent.click(screen.getByRole('button', { name: /刪除留言/ }));
   // Then
   expect(await screen.findByRole('alert')).toHaveTextContent('Comment deletion denied');
   expect(screen.getByText('Existing comment')).toBeVisible();

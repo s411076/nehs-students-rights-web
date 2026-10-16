@@ -36,6 +36,9 @@ export async function sendRightsAction(request: RightsActionRequest, refresh?: (
     result = parseResult(await response.json());
     if (!result || response.ok !== result.ok) return unknownOutcome();
   } catch { return unknownOutcome(); }
+  // Definitive rejections (400/401/403/409/413/415) pass through with generic
+  // messages; only transport/ambiguous outcomes (network/timeout/shape
+  // mismatch/503 UNAVAILABLE) collapse to OUTCOME_UNKNOWN. Fail-closed: never retry.
   if (!result.ok) return result.code === 'UNAVAILABLE' ? unknownOutcome() : result;
   if (refresh) {
     try {

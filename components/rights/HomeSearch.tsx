@@ -29,18 +29,18 @@ export function HomeSearch() {
     <p id="home-search-scope" className="text-xs text-gray-500 dark:text-slate-400 mt-2">搜尋所有公開提案與建言的標題、內容；結果分頁載入，不包含討論留言。</p>
     {!valid && <p role="alert" className="text-sm text-red-700 dark:text-red-400 mt-2">搜尋關鍵字最多 100 字。</p>}
     {enabled && <div className="mt-4 space-y-2">
-      {proposals.status === 'loading' && <p className="text-xs text-gray-400 py-1">提案搜尋載入中…</p>}
+      {proposals.status === 'loading' && <p className="text-xs text-gray-500 dark:text-slate-400 py-1">提案搜尋載入中…</p>}
       {proposals.status === 'error' && <div className="flex items-center gap-2 py-1">
         <p className="text-xs text-red-600 dark:text-red-400">提案載入失敗，請重試。</p>
         <button type="button" onClick={() => void proposals.refresh()} className="min-h-11 text-xs font-bold text-blue-600 dark:text-blue-400 underline">重試提案</button>
       </div>}
-      {feedback.status === 'loading' && <p className="text-xs text-gray-400 py-1">建言搜尋載入中…</p>}
+      {feedback.status === 'loading' && <p className="text-xs text-gray-500 dark:text-slate-400 py-1">建言搜尋載入中…</p>}
       {feedback.status === 'error' && <div className="flex items-center gap-2 py-1">
         <p className="text-xs text-red-600 dark:text-red-400">建言載入失敗，請重試。</p>
         <button type="button" onClick={() => void feedback.refresh()} className="min-h-11 text-xs font-bold text-blue-600 dark:text-blue-400 underline">重試建言</button>
       </div>}
       <p className="text-xs font-bold text-gray-500 dark:text-slate-400">已載入搜尋結果 ({results.length} 筆)：</p>
-      {proposals.status === 'ready' && feedback.status === 'ready' && results.length === 0 && <p className="text-xs text-gray-400 py-2">找不到符合「{query}」的提案或建言。</p>}
+      {proposals.status === 'ready' && feedback.status === 'ready' && results.length === 0 && <p className="text-xs text-gray-500 dark:text-slate-400 py-2">找不到符合「{query}」的提案或建言。</p>}
       {results.map(result => <a key={result.id} href={result.url}
         className="p-3.5 bg-gray-50 dark:bg-slate-800/80 hover:bg-blue-50 dark:hover:bg-slate-700/80 rounded-xl border dark:border-slate-700/60 cursor-pointer transition flex justify-between items-center group focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900">
         <div className="flex-1 min-w-0 pr-4">

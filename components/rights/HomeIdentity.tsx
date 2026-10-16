@@ -67,7 +67,7 @@ export function HomeIdentity() {
         className="text-sm font-bold text-blue-600 dark:text-blue-400 underline rounded focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 disabled:cursor-wait">{authRetryNonce > 0 ? '重試中…' : '重試身分驗證'}</button>
     </div> : !isLoggedIn ? <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-8 rounded-2xl shadow-lg mb-10 text-center relative overflow-hidden">
       <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-slate-200">登入學生權益網</h2>
-      <div className="flex items-center justify-center py-6 relative min-h-[160px]">
+      <div className="flex items-center justify-center py-6 relative min-h-[160px] sm:min-h-0">
         <button type="button" onClick={() => void login()} disabled={loginPending} aria-busy={loginPending}
           className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xl sm:text-2xl py-6 px-4 sm:px-10 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-150 motion-reduce:transition-none flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-wait">
           <span aria-live="polite">{loginPending ? '登入中…' : '以學校帳號登入'}</span>

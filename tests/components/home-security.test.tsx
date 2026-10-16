@@ -413,26 +413,18 @@ test('keeps the single login entry locked while OAuth is starting and awaiting n
   expect(login).toBeDisabled();
 });
 
-test.each([true, false])('stops login movement when reduced motion is %s at mount or enabled later', async reducedAtMount => {
-  // Given the system motion preference and a signed-out visitor
-  vi.useFakeTimers();
-  const preference = motionPreference(reducedAtMount);
+test('keeps the login button stationary with no motion timers', async () => {
+  // Given a signed-out visitor regardless of system motion preference
+  motionPreference(false);
   stubFetch(() => rightsBody({ ok: true, data: [] }));
+  vi.useFakeTimers();
   await act(async () => { render(<HomePage />); });
   const login = screen.getByRole('button', { name: /以學校帳號登入/ });
-  if (!reducedAtMount) {
-    act(() => { vi.advanceTimersByTime(100); });
-    expect(login.style.transform).not.toBe('translate(0px, 0px)');
-  }
-  // When reduced motion applies, including a live system-preference change
-  act(() => {
-    preference.matches = true;
-    preference.dispatchEvent(new Event('change'));
-    vi.advanceTimersByTime(100);
-  });
-  // Then the button is stationary and its interval is stopped
-  expect(login).toHaveStyle({ transform: 'translate(0px, 0px)' });
+  act(() => { vi.advanceTimersByTime(1000); });
+  // Then the button never moves and schedules no animation timers
+  expect(login.style.transform).toBe('');
   expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
 });
 
 test('names the public search field and exposes results as focusable item deep-links', async () => {

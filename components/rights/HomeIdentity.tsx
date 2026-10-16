@@ -19,26 +19,8 @@ export function HomeIdentity() {
   const [authRetryNonce, setAuthRetryNonce] = useState(0);
   const [loginPending, setLoginPending] = useState(false);
   const loginFlight = useRef(false);
-  const [posStudent, setPosStudent] = useState({ x: 0, y: 0 });
   const [oauthOutcome, setOauthOutcome] = useState<'failure' | 'ineligible' | null>(null);
   useEffect(() => { if (authRetryNonce > 0) window.location.reload(); }, [authRetryNonce]);
-  useEffect(() => {
-    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let interval: ReturnType<typeof setInterval> | undefined;
-    const updateMotion = () => {
-      clearInterval(interval);
-      if (motionQuery.matches || loginPending || isLoggedIn || authStatus === 'unavailable') {
-        setPosStudent({ x: 0, y: 0 });
-        return;
-      }
-      interval = setInterval(() => {
-        setPosStudent({ x: Math.sin(Date.now() / 800) * 18, y: Math.cos(Date.now() / 600) * 10 });
-      }, 50);
-    };
-    updateMotion();
-    motionQuery.addEventListener('change', updateMotion);
-    return () => { clearInterval(interval); motionQuery.removeEventListener('change', updateMotion); };
-  }, [loginPending, isLoggedIn, authStatus]);
   useEffect(() => {
     let active = true;
     const gen = generation;
@@ -87,7 +69,6 @@ export function HomeIdentity() {
       <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-slate-200">登入學生權益網</h2>
       <div className="flex items-center justify-center py-6 relative min-h-[160px]">
         <button type="button" onClick={() => void login()} disabled={loginPending} aria-busy={loginPending}
-          style={{ transform: `translate(${posStudent.x}px, ${posStudent.y}px)` }}
           className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xl sm:text-2xl py-6 px-4 sm:px-10 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-150 motion-reduce:transition-none flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-wait">
           <span aria-live="polite">{loginPending ? '登入中…' : '以學校帳號登入'}</span>
           <span className="text-sm font-normal">（限 @nehs.hc.edu.tw）</span>

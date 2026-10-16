@@ -80,3 +80,34 @@ node tests/real/boundary.http.mjs "$STATE"
 - 容器腳本可攜性未做，在做成可重建前不宣稱遠端 CI 可跑。
 
 都補齊之前，本文件不是上線完成證明。
+
+## 7. 正式切換紀錄（2026-10-16， Migration 已套用）
+
+上游 PR #2（baseline UX）與 #3（hardening）皆已合併；線上為新版網站，正式 DB 已於同日套用
+`supabase/migrations/20261015183529_rights_hardening.sql`，history 登記為版本
+`20261015183529`／名稱 `rights_hardening`。
+
+切換前完成事項：
+
+- 重新唯讀匯出正式 DB（48 表、983 筆，database.dump SHA256
+  `16e00b4384dd579b1b6105837c0eaa37960c09f46b2e4a4d5faf4096e0af42ff`），備份放外部備份目錄，不進版控。
+- 漂移比對：migration history 仍為原 4 筆；三個 endorsements 觸發器存在；無殘留 hardening 物件；
+  無 NULL created_at、無負票數；筆數 proposals 5、feedback 7、feedbacks 2、comments 2、admins 4、
+  endorsements 3、home_sections 2。
+- 套用採單一交易 psql（`ON_ERROR_STOP=1`，6.6 秒）。中途兩次 MCP 送件因轉錄落字失敗，
+  均完整 rollback（事後驗證無殘留物件、筆數不變、history 未登記），第三次以檔案位元組原樣套用成功。
+  臨時連線檔已安全刪除。
+
+切換後驗證（正式 DB 直接查詢）：
+
+- `rights_executor`、`rights_private`、22 個公開 RPC、9 個私有函式存在。
+- 9 張表 RLS 全開；`anon`／`authenticated` 直接讀寫全撤回。
+- 資料筆數與切換前一致；ballots 從空開始；無 NULL baseline／version。
+- 公開提案 RPC 回 3 筆，票數 baseline 5／7／16 保留；limit=2 回 2 筆且有 `nextCursor`；
+  feedback 7 筆、home 2 筆；公開輸出零身分欄位洩漏。
+- 未登入呼叫 pending 遭 PT401；`rights_is_admin()` 未登入回 false。
+- 安全建議：RLS critical 項已消失；剩餘為預期內的 definer-RPC 可執行提醒（守衛在函式內）、
+  無 policy 的凍結表 INFO，以及需 Pro 的外洩密碼保護 WARN（保留評估）。
+
+後續保留：真 Google 登入端到端、正式站瀏覽器 smoke、LICENSE PR #4 合併、已合併本地分支清理、
+結構整理盤點（見 `.omo/db-required.local.md`，不進版控）。

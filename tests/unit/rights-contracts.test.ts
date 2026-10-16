@@ -3,7 +3,7 @@
  * Covers all 13 action payloads, exact status/category sets, code-point
  * lengths, safe counts, sentinel stripping and exact-domain eligibility.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_ACTIONS,
   CONTROL_STATUSES,
@@ -21,6 +21,7 @@ import {
 } from '@/lib/rights/contracts';
 import {
   countCodePoints,
+  fallbackFeedbackTitle,
   formatProposalTitle,
   parseActionRequest,
   validateBody,
@@ -33,7 +34,9 @@ import {
   validateProposalFinalTitle,
   validateRawTitle,
   validateReply,
+  truncateToCodePoints,
 } from '@/lib/rights/validation';
+import { sendRightsAction } from '@/lib/rights/client';
 import {
   COMMENT_SELECT,
   FEEDBACK_SELECT,
@@ -428,5 +431,54 @@ describe('rights results: typed union with generic Traditional Chinese messages'
       expect(parsed.code).toBe('INVALID_PAYLOAD');
       expect(parsed.message).toBe(GENERIC_MESSAGES.INVALID_PAYLOAD);
     }
+  });
+});
+
+describe('feedback fallback title: code-point-safe truncation', () => {
+  it('never splits surrogate pairs when deriving titles from emoji content', () => {
+    const content = '🏫'.repeat(20);
+    expect(content.slice(0, 15)).not.toBe('🏫'.repeat(15)); // UTF-16 slice splits the 8th pair
+    const title = fallbackFeedbackTitle('', content);
+    expect(title).toBe(`${'🏫'.repeat(15)}...`);
+    expect(Array.from(title.slice(0, -3))).toHaveLength(15);
+    expect(() => encodeURIComponent(title)).not.toThrow(); // throws on lone surrogates
+  });
+
+  it('keeps short content whole and preserves provided titles', () => {
+    expect(fallbackFeedbackTitle('', 'short content')).toBe('short content');
+    expect(fallbackFeedbackTitle('', '中'.repeat(15))).toBe('中'.repeat(15));
+    expect(fallbackFeedbackTitle('', '中'.repeat(16))).toBe(`${'中'.repeat(15)}...`);
+    expect(fallbackFeedbackTitle('provided', '🏫'.repeat(20))).toBe('provided');
+    expect(truncateToCodePoints('🏫'.repeat(20), 15)).toBe('🏫'.repeat(15));
+  });
+});
+
+describe('rights client: definitive rejections pass through, ambiguous collapses', () => {
+  const feedback = {
+    action: 'createFeedback',
+    payload: { title: '', content: 'hi', category: '其他', isAnonymous: true },
+  } as const;
+
+  it('preserves 403 FORBIDDEN and 409 CONFLICT instead of collapsing to unknown', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, code: 'FORBIDDEN' }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 })));
+    await expect(sendRightsAction(feedback)).resolves.toMatchObject({ ok: false, code: 'FORBIDDEN' });
+    const conflict = await sendRightsAction(feedback);
+    expect(conflict).toMatchObject({ ok: false, code: 'CONFLICT' });
+    if (!conflict.ok && conflict.code === 'CONFLICT') {
+      expect(conflict.message).toBe(GENERIC_MESSAGES.CONFLICT);
+      expect(JSON.stringify(conflict)).not.toContain('SELECT');
+    } else {
+      expect.unreachable('expected a CONFLICT failure');
+    }
+  });
+
+  it('collapses 503 UNAVAILABLE and transport failures to OUTCOME_UNKNOWN', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, code: 'UNAVAILABLE' }, { status: 503 }))
+      .mockRejectedValueOnce(new TypeError('connection lost')));
+    await expect(sendRightsAction(feedback)).resolves.toMatchObject({ ok: false, code: 'OUTCOME_UNKNOWN' });
+    await expect(sendRightsAction(feedback)).resolves.toMatchObject({ ok: false, code: 'OUTCOME_UNKNOWN' });
   });
 });

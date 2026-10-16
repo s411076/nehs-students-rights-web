@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { AuthorizationError, getVerifiedIdentity, requireAdmin } from '@/lib/auth/server';
 import { ADMIN_ACTIONS, makeFailure, makeSuccess, PUBLIC_STATUSES } from './contracts';
 import type { ResultCode, RightsActionRequest, RightsResult } from './contracts';
-import { formatProposalTitle } from './validation';
+import { fallbackFeedbackTitle, formatProposalTitle } from './validation';
 
 export type MutationReceipt = { readonly inserted: true } | { readonly id: string; readonly upvotes_count?: number };
 const STATUS: Record<ResultCode, number> = {
@@ -63,7 +63,7 @@ export async function executeRightsAction(client: SupabaseClient, request: Right
     }
     case 'createFeedback': {
       const p = request.payload;
-      const title = p.title || (p.content.length > 15 ? p.content.slice(0, 15) + '...' : p.content);
+      const title = fallbackFeedbackTitle(p.title, p.content);
       return insert('feedback', { title, content: p.content, category: p.category,
         is_anonymous: p.isAnonymous, author_name: p.isAnonymous ? '匿名學生' : identity.displayName });
     }

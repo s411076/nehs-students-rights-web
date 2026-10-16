@@ -1,7 +1,7 @@
 ﻿'use client'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { GraduationCap, House, Lightbulb, MessageSquareText, User, Wrench, X } from 'lucide-react'
+import { House, Lightbulb, MessageSquareText, User, Wrench, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { useAuth, useLogoutNotice } from '@/components/AuthProvider'
 
@@ -98,7 +98,7 @@ export default function Navbar() {
             </button>
 
             <Link className="min-w-0 truncate font-extrabold text-lg tracking-tight text-inherit" href="/">
-              <GraduationCap aria-hidden="true" size={18} className="shrink-0" /> 竹科實中學權組
+              竹科實中學權組
             </Link>
           </div>
 
@@ -159,7 +159,7 @@ export default function Navbar() {
         <div className="shrink-0">
           <div className="p-5 border-b dark:border-slate-800 flex justify-between items-center">
             <span className="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
-              <GraduationCap aria-hidden="true" size={18} className="shrink-0" /> 導覽選單
+              導覽選單
             </span>
             <button
               type="button"

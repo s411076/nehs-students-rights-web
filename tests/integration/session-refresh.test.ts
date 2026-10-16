@@ -21,10 +21,14 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.unstubAllEnvs(); await fixture.close(); });
 
-test.each(['/', '/admin', '/admin/settings', '/profile', '/feedback', '/proposals/1', '/auth/callback', '/api/rights/feedback'])('refreshes eligible %s requests', url => {
+test.each(['/', '/profile', '/feedback', '/proposals/1', '/auth/callback', '/api/rights/feedback'])('refreshes eligible %s requests', url => {
   expect(unstable_doesMiddlewareMatch({ config, nextConfig: {}, url })).toBe(true);
 });
 test.each(['/_next/static/chunk.js', '/_next/image', '/assets/logo.svg', '/favicon.ico', '/logo.png'])('excludes static %s requests', url => {
+  expect(unstable_doesMiddlewareMatch({ config, nextConfig: {}, url })).toBe(false);
+});
+test.each(['/admin', '/admin/settings'])('leaves removed %s routes to the app-router 404', url => {
+  // Given a removed backend URL; when matching proxy routes; then no auth refresh intercepts it.
   expect(unstable_doesMiddlewareMatch({ config, nextConfig: {}, url })).toBe(false);
 });
 
@@ -79,7 +83,7 @@ test('denies admin and preserves original failure when refresh cookie writes fai
 });
 
 test('does not authorize or query memberships when proxy has no session', async () => {
-  const response = await proxy(new NextRequest('http://localhost/admin'));
+  const response = await proxy(new NextRequest('http://localhost/feedback'));
   expect(response.status).toBe(200);
   expect(response.headers.get('cache-control')).toContain('no-store');
   expect(fixture.data.requests).toEqual([]);

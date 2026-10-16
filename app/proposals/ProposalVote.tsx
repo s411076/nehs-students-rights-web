@@ -1,12 +1,14 @@
 'use client';
 
 import { useLayoutEffect, useRef, useState } from 'react';
+import { ThumbsUp } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { readRights } from '@/lib/rights/client';
 import { isPublicStatus, isRecord, isSafeCount, toProposalDTO } from '@/lib/rights/queries';
 import type { ProposalDTO } from '@/lib/rights/queries';
 import { useRightsMutation } from '@/components/rights/useRightsMutation';
 import { ActionFeedback } from '@/components/rights/ActionFeedback';
+import { ui } from '@/components/rights/ui';
 
 type Ballot = { readonly source: ProposalDTO; readonly voted: boolean; readonly count: number };
 
@@ -59,17 +61,15 @@ export function ProposalVote({ item }: { readonly item: ProposalDTO }) {
   return <div className="pt-1 space-y-2">
     <button type="button" onClick={() => void vote()} disabled={mutation.busy || uncertain}
       aria-pressed={displayed.voted} aria-busy={mutation.busy}
-      className={`min-h-11 px-3.5 py-1.5 text-xs font-semibold rounded-full border transition flex items-center gap-1.5 shadow-sm focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 ${displayed.voted
-        ? 'bg-blue-600 text-white border-transparent hover:bg-blue-700'
-        : 'bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border-gray-200 dark:border-slate-700'}`}>
-      👍 {displayed.voted ? '已聯署 (點擊取消)' : '覆議/聯署'}{' '}
-      <span className={`px-1.5 py-0.5 rounded-full text-[11px] ${displayed.voted ? 'bg-blue-800 text-white' : 'bg-blue-200 text-blue-900'}`}>{displayed.count}</span>
+      className={displayed.voted ? ui.primaryButton : ui.secondaryButton}>
+      <ThumbsUp aria-hidden="true" className="size-4 shrink-0" /> {displayed.voted ? '已聯署 (點擊取消)' : '覆議/聯署'}{' '}
+      <span className={ui.badge}>{displayed.count}</span>
     </button>
-    {item.legacy_upvotes_count > 0 && <p className="text-xs text-gray-500 dark:text-slate-400">
+    {item.legacy_upvotes_count > 0 && <p className="text-xs text-gray-500 dark:text-neutral-400">
       含歷史連署 {item.legacy_upvotes_count} 票；取消只影響您的新連署，不會扣除歷史票數。
     </p>}
     <ActionFeedback error={mutation.error} notice="" />
     {uncertain && <button type="button" onClick={() => void reconcile()}
-      className="min-h-11 text-sm font-semibold underline text-blue-700 dark:text-blue-300 focus-visible:ring-2 focus-visible:ring-blue-500 rounded">更新連署狀態</button>}
+      className={ui.secondaryButton}>更新連署狀態</button>}
   </div>;
 }

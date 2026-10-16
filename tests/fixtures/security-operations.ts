@@ -35,9 +35,9 @@ export async function moderation(page: Page, context: BrowserContext, request: A
   await page.getByRole('button', { name: /退回提案/ }).click();
   await expect(page.getByRole('button', { name: /退回提案/ })).toHaveCount(0);
   expect((await state(request)).rows('proposals').find(row => row.title === '[其他] Reject in browser')?.status).toBe('被退回');
-  await page.goto('/admin');
+  await page.goto('/feedback');
   await page.getByRole('button', { name: '刪除建言', exact: true }).click();
-  await expect(page.getByText('目前沒有收到建言。', { exact: true })).toBeVisible();
+  await expect(page.getByText('目前尚無意見回饋。', { exact: true })).toBeVisible();
   expect((await state(request)).total).toBe(9);
   for (const action of [
     { action: 'rejectProposal', payload: { id: 'missing', expectedVersion: 1 } },

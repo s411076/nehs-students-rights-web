@@ -28,7 +28,8 @@ export function usePublicItemLink<T extends { readonly id: string }>(
   const active = useRef(true);
   const sequence = useRef(0);
   const invalidate = useCallback(() => { sequence.current++; }, []);
-  const listed = items.some(item => hash === `#item-${item.id}`);
+  const listedIndex = items.findIndex(item => hash === `#item-${item.id}`);
+  const listed = listedIndex !== -1;
   const [linked, setLinked] = useState<{ readonly scope: string; readonly item: T | null; readonly message: string } | null>(null);
   const [wasListed, setWasListed] = useState(listed);
   const [dismissedScope, setDismissedScope] = useState<string | null>(null);
@@ -72,9 +73,22 @@ export function usePublicItemLink<T extends { readonly id: string }>(
   }, [load, receive, listed, dismissed, id, invalidate]);
   const target = linked?.scope === scope ? linked.item : null;
   const present = listed || (target !== null && hash === `#item-${target.id}`);
+  // Async list rows can move a fetched target without changing present.
+  const position = listed ? listedIndex : items.length;
+  const destination = useMemo(() => present ? { id: hash.slice(1), position } : null, [hash, present, position]);
   useEffect(() => {
-    if (present) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' });
-  }, [hash, present]);
+    if (!destination) return;
+    const scroll = () => {
+      const element = document.getElementById(destination.id);
+      if (!element) return false;
+      element.scrollIntoView({ block: 'start' });
+      return true;
+    };
+    let frame = requestAnimationFrame(() => {
+      if (!scroll()) frame = requestAnimationFrame(scroll);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [destination]);
   return {
     target: listed ? null : target,
     message: id && !id.ok ? '連結格式不正確。' : linked?.scope === scope ? linked.message : '',

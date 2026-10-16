@@ -43,7 +43,7 @@ export default function AuthCallbackPage() {
   if (view === 'success') {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center p-6 text-center sm:p-12">
-        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入成功！正在前往首頁…</h2>
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-neutral-200">登入成功！正在前往首頁…</h2>
       </main>
     )
   }
@@ -51,8 +51,8 @@ export default function AuthCallbackPage() {
   if (view === 'ineligible') {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center sm:p-12">
-        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">無法使用登入功能</h2>
-        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-slate-400">
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-neutral-200">無法使用登入功能</h2>
+        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-neutral-400">
           此帳號不是已確認的學校帳號（限 @nehs.hc.edu.tw）。公開內容仍可瀏覽，請使用學校帳號重新登入。
         </p>
         <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
@@ -65,8 +65,8 @@ export default function AuthCallbackPage() {
   if (view === 'failure') {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center sm:p-12">
-        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入失敗</h2>
-        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-slate-400">
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-neutral-200">登入失敗</h2>
+        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-neutral-400">
           登入未完成或連結已失效（例如重複使用的登入連結），請回首頁重新登入。
         </p>
         <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
@@ -78,8 +78,8 @@ export default function AuthCallbackPage() {
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center p-6 text-center sm:p-12">
-      <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入驗證中…</h2>
-      <p role="status" className="mt-2 text-sm text-gray-500 dark:text-slate-400">
+      <h2 className="text-xl font-semibold text-gray-700 dark:text-neutral-200">登入驗證中…</h2>
+      <p role="status" className="mt-2 text-sm text-gray-500 dark:text-neutral-400">
         正在確認學校帳號登入狀態，請稍候。
       </p>
     </main>

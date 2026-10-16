@@ -9,7 +9,6 @@ import { GET as feedback } from '../../app/api/rights/feedback/route';
 import { GET as pending } from '../../app/api/rights/proposals/pending/route';
 import { GET as proposals } from '../../app/api/rights/proposals/route';
 import { GET as home } from '../../app/api/rights/home-sections/route';
-import { GET as adminFeedback } from '../../app/api/rights/admin/feedback/route';
 import { GET as authors } from '../../app/api/rights/authors/route';
 import { GET as items } from '../../app/api/rights/items/route';
 import { GET as comments } from '../../app/api/rights/proposals/[id]/comments/route';
@@ -40,10 +39,9 @@ test.each(['student', 'outsider', 'unconfirmed'] as const)('denies pending read 
   expect(fixture.data.requests.filter(r => r.path.startsWith('/rest/')).every(r => r.path === '/rest/v1/rpc/rights_is_admin')).toBe(true);
   expect(fixture.data.counters.total).toBe(0);
 });
-test('denies absent session on pending, admin feedback, and authors before private RPC', async () => {
+test('denies absent session on pending and authors before private RPC', async () => {
   for (const { handler, path } of [
     { handler: pending, path: '/api/rights/proposals/pending' },
-    { handler: adminFeedback, path: '/api/rights/admin/feedback' },
     { handler: authors, path: '/api/rights/authors?kind=feedback&id=feedback-1' },
   ]) {
     expect((await handler(new NextRequest(`http://localhost${path}`))).status).toBe(401);
@@ -60,10 +58,10 @@ test('admin pending returns projected versioned Page after fresh guard', async (
     reply: '', created_at: '2026-01-01T00:00:00Z', version: 1, viewer_voted: false, legacy_upvotes_count: 0 }], nextCursor: null } });
   expect(fixture.data.requests.map(r => r.path)).toEqual(['/auth/v1/user', '/rest/v1/rpc/rights_is_admin', '/rest/v1/rpc/rights_list_pending_proposals']);
 });
-test('admin feedback list is redacted while guarded author lookup can identify attribution', async () => {
+test('public feedback stays redacted for admins while guarded author lookup can identify attribution', async () => {
   const seeded = await sessionRequest(fixture.url, 'admin');
   const headers = { cookie: seeded.headers.get('cookie') ?? '' };
-  const list = await adminFeedback(new NextRequest('http://localhost/api/rights/admin/feedback', { headers }));
+  const list = await feedback(new NextRequest('http://localhost/api/rights/feedback', { headers }));
   expect(list.status).toBe(200);
   expect(await list.text()).not.toContain('ANONYMOUS_AUTHOR_SENTINEL');
   const author = await authors(new NextRequest('http://localhost/api/rights/authors?kind=feedback&id=feedback-1', { headers }));

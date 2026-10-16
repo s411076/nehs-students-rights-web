@@ -24,7 +24,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     test('guest public search excludes private records and anonymous authors', async ({ page, context }) => {
       // Given a guest and a permissive provider containing private sentinel fields.
       // When public HTML/JSON and the actual search UI are loaded.
-      for (const path of ['/', '/proposals', '/feedback', '/admin']) {
+      for (const path of ['/', '/proposals', '/feedback']) {
         const response = await context.request.get(`${appURL}${path}`, { maxRedirects: 0 });
         const text = await response.text();
         expect(text).not.toMatch(/PRIVATE_SENTINEL|ANONYMOUS_AUTHOR_SENTINEL|Fixture 待審核|Fixture 被退回/);
@@ -48,31 +48,40 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
 test('admin reply save and confirmed clear complete through real routes', async ({ page, context, request }) => {
   // Given SDK-generated chunked admin cookies.
   await login(context, 'admin');
-  await page.goto('/admin');
-  const editor = page.getByLabel('官方回覆', { exact: true });
+  await page.goto('/feedback');
+  const editor = page.getByRole('textbox', { name: '回覆「Fixture feedback」', exact: true });
   await expect(editor).toBeVisible();
   // When a reply is saved and subsequently cleared through confirmation.
   await editor.fill('Browser official reply');
-  await page.getByRole('button', { name: '發布/更新回覆' }).click();
-  await expect(page.getByRole('status')).toContainText('成功');
+  await page.getByRole('button', { name: '發布官方回覆' }).click();
+  await expect(page.locator('main').getByRole('status')).toContainText('成功');
   expect((await state(request)).rows('feedback')[0]?.reply).toBe('Browser official reply');
   await capture(page, 'admin-saved-1440');
   await editor.fill('');
   const confirmation = page.waitForEvent('dialog');
-  await page.getByRole('button', { name: '發布/更新回覆' }).click();
+  await page.getByRole('button', { name: '發布官方回覆' }).click();
   expect((await confirmation).type()).toBe('confirm');
   await expect.poll(async () => (await state(request)).total).toBe(2);
   // Then the provider contains an empty reply, not a silently ignored write.
   expect((await state(request)).rows('feedback')[0]?.reply).toBe('');
   await capture(page, 'admin-cleared-1440');
 });
+test('removed backend page and feedback API return 404 even for an admin', async ({ context, request }) => {
+  await login(context, 'admin');
+  for (const path of ['/admin', '/api/rights/admin/feedback']) {
+    expect((await context.request.get(`${appURL}${path}`, { maxRedirects: 0 })).status()).toBe(404);
+  }
+  expect((await state(request)).requests.some(entry => entry.path.endsWith('/rights_list_admin_feedback'))).toBe(false);
+});
+
 for (const identity of ['guest', 'student', 'outsider', 'unconfirmed'] as const) {
   test(`${identity} cannot read or mutate privileged data`, async ({ page, context, request }) => {
     // Given anonymous, eligible nonadmin, or ineligible verified provider identities.
     if (identity !== 'guest') await login(context, identity);
     // When calling protected HTTP surfaces directly, independent of UI visibility.
     const admin = await context.request.get(`${appURL}/admin`, { maxRedirects: 0 });
-    expect(admin.status()).toBe(identity === 'guest' ? 307 : 404);
+    expect(admin.status()).toBe(404);
+    expect((await context.request.get(`${appURL}/api/rights/admin/feedback`)).status()).toBe(404);
     expect(await admin.text()).not.toContain('ANONYMOUS_AUTHOR_SENTINEL');
     expect((await state(request)).requests.filter(entry => entry.path.startsWith('/rest/v1/feedback'))).toHaveLength(0);
     expect((await state(request)).requests.filter(entry => entry.path.startsWith('/rest/v1/rpc/rights_list_admin_feedback'))).toHaveLength(0);
@@ -192,7 +201,7 @@ test('confirmed vote and cancellation keep zero literal and ignore forged local 
    await login(context, 'student');
    await page.addInitScript(() => localStorage.setItem('voted_proposals:student', '["proposal-1"]'));
   await page.goto('/proposals');
-  const vote = page.getByRole('button', { name: /👍/ });
+  const vote = page.getByRole('button', { name: /覆議\/聯署|已聯署/ });
   await expect(vote.locator('span')).toHaveText('0');
   // When rapidly voting then cancelling after the confirmed receipt.
   await vote.evaluate(button => {
@@ -222,17 +231,14 @@ test('failed provider loads and writes remain explicit with drafts retained', as
   await page.goto('/feedback');
   await expect(page.getByText('無法載入建言，請稍後再試。')).toBeVisible();
    await capture(page, 'load-failure');
-   await control(request, { path: '/rest/v1/rpc/rights_list_admin_feedback', method: 'POST' });
-  await page.goto('/admin');
-  await expect(page.locator('main').getByRole('alert')).toBeVisible();
   await control(request, { clear: true });
-  await page.goto('/admin');
-  await page.getByLabel('官方回覆', { exact: true }).fill('Retain failed reply');
+  await page.goto('/feedback');
+  await page.getByRole('textbox', { name: '回覆「Fixture feedback」', exact: true }).fill('Retain failed reply');
    await control(request, { path: '/rest/v1/rpc/rights_save_feedback_reply', method: 'POST' });
-  await page.getByRole('button', { name: '發布/更新回覆' }).click();
+  await page.getByRole('button', { name: '發布官方回覆' }).click();
   // Then no successful write is claimed and the exact draft remains editable.
   await expect(page.locator('main').getByRole('alert')).toContainText('無法確認');
-  await expect(page.getByLabel('官方回覆', { exact: true })).toHaveValue('Retain failed reply');
+  await expect(page.getByRole('textbox', { name: '回覆「Fixture feedback」', exact: true })).toHaveValue('Retain failed reply');
   expect((await state(request)).total).toBe(0);
   await capture(page, 'write-failure');
 });

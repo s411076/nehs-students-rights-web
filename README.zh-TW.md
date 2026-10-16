@@ -68,6 +68,8 @@ npm run test:e2e
 
 ## How It Works
 
+**管理功能直接留在公開頁面，不另設後台。**管理員在 `/feedback` 回覆、刪除建言及查詢作者；在 `/proposals` 核可／退回提案、編輯狀態與回覆、刪除留言及查詢作者。首頁區塊的新增／刪除留在 `/`。`/admin` 及其建言列表 API 已移除，造訪會回傳 404。
+
 **伺服器優先驗證身分。**每次請求都用 `getUser()` 向 Auth 伺服器重新驗證，只接受已確認的 `nehs.hc.edu.tw` 完整 domain（`lib/auth/server.ts`）；管理員身分改走只回答呼叫者資格的 `rights_is_admin` RPC，不列舉管理員名單。資料庫檢查目前學校資格及受保護、具有唯一約束的管理員紀錄。`proxy.ts` 只做 refresh 傳遞，不做授權快取。
 
 **所有寫入走 13 個動作的 POST allowlist。**`POST /api/rights/actions`（`lib/rights/server-actions.ts`）只接受 4 個學生動作（`createProposal`、`createFeedback`、`addComment`、`setVote`）與 9 個管理動作（提案審核、留言刪除、回覆儲存、公告管理等），請求體用 `parseActionRequest` 精確解析，來源 Origin、JSON 媒體型別與 65536 位元組上限都在守衛內。`setVote` 是 desired-state 且冪等：歷史票維持不可變 baseline，新票從每人空 ballots 開始，總數不改寫歷史，舊帳不重複計數。每次寫入都在資料庫衍生 UUID 並私下記錄顯示歸屬。
@@ -86,7 +88,6 @@ app/
   proposals/page.tsx     提案列表、留言、連署投票
   feedback/page.tsx      匿名意見回饋
   profile/page.tsx       個人頁（只顯示已驗證身分，不查提案）
-  admin/page.tsx         伺服器 gate 後的管理面板
   auth/callback/page.tsx OAuth 回調完成頁
   api/rights/
     actions/route.ts     13 動作 POST allowlist
@@ -96,7 +97,7 @@ app/
 components/
   AuthProvider.tsx       世代守衛的身分 provider
   Navbar.tsx             同步身分、fail-closed 登出
-  admin/                 管理面板客戶端元件
+  admin/                 受管理員驗證保護的行內作者查詢
 lib/
   auth/                  伺服器驗證、型別、OAuth 完成
   rights/                契約、校驗、投影、伺服器動作、RPC 讀取、客戶端

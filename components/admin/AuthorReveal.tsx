@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { readRights } from '@/lib/rights/client';
 import { toAuthorDTO } from '@/lib/rights/queries';
 import type { AuthorDTO } from '@/lib/rights/queries';
+import { ui } from '@/components/rights/ui';
 
 type AuthorTarget = { readonly kind: 'proposal' | 'feedback' | 'comment'; readonly id: string };
 
@@ -37,15 +39,16 @@ function AuthorLookup({ kind, id }: AuthorTarget) {
     if (result.ok) setAuthor(result.data);
     else setError('無法查看作者。請確認管理員權限後再試。');
   };
-  return <div className="space-y-2 text-sm text-gray-700 dark:text-slate-300">
+  return <div className="space-y-2 text-sm text-gray-700 dark:text-neutral-300">
     <button type="button" disabled={busy} aria-expanded={author !== null}
       onClick={() => author ? setAuthor(null) : void reveal()}
-      className="min-h-11 px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60">
+      className={ui.secondaryButton}>
+      <ShieldCheck aria-hidden="true" className="size-4 shrink-0" />
       {busy ? '作者資料載入中…' : author ? '隱藏作者資料' : '查看作者（僅管理員）'}
     </button>
     {error && <p role="alert">{error}</p>}
-    {author && <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800 space-y-1 break-words">
-      <p className="font-semibold">管理員專用作者資料（不會顯示於公開作者欄位）</p>
+    {author && <div className={`${ui.inset} p-3 space-y-1 break-words`}>
+      <p className="font-semibold flex items-center gap-1.5"><ShieldCheck aria-hidden="true" className="size-4 shrink-0" />管理員專用作者資料（不會顯示於公開作者欄位）</p>
       <Attribution author={author} />
     </div>}
   </div>;

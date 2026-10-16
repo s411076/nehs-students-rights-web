@@ -45,6 +45,8 @@ p_query filters title/content before pagination, maximum 100 Unicode code points
 | rights_is_admin | none; caller-only boolean |
 | rights_admin_author | p_kind ('proposal', 'feedback', 'comment'), p_id |
 
+`rights_list_admin_feedback` remains a database contract; no app route calls it after removal of the separate admin page/API.
+
 Existing DTO fields remain. All list DTOs add version:number. Proposal DTO also
 adds viewer_voted:boolean and legacy_upvotes_count:number. Counts are safe integer
 JSON numbers. Public feedback omits author_name for anonymous rows; public comments
@@ -55,9 +57,9 @@ attribution is known. Historical identifiers are not automatically trusted.
 
 HTTP list endpoints use the existing RightsResult envelope containing Page<T>.
 Endpoints: /api/rights/proposals, /feedback, /home-sections, /proposals/pending,
-/admin/feedback, /proposals/[id]/comments, /authors, /items (all under /api/rights).
+/proposals/[id]/comments, /authors, /items (all under /api/rights).
 List query parameters are limit, cursor (JSON), query; targeted reads use kind,id.
-Admin lists and author lookup require the server admin guard as well as DB checks.
+Pending proposal lists and author lookup require the server admin guard as well as DB checks.
 
 ## Mutation contract
 

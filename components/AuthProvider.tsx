@@ -80,6 +80,15 @@ function parseIdentity(value: unknown): Readonly<SessionIdentity> {
   return { id: value.id, email: value.email, displayName: value.displayName, isAdmin: value.isAdmin };
 }
 
+function sameIdentity(
+  left: Readonly<SessionIdentity> | null,
+  right: Readonly<SessionIdentity> | null,
+): boolean {
+  if (left === null || right === null) return left === null && right === null;
+  return left.id === right.id && left.email === right.email &&
+    left.displayName === right.displayName && left.isAdmin === right.isAdmin;
+}
+
 export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [oauthReturn] = useState(captureOAuthReturn);
   const [state, setState] = useState<AuthState>({ status: 'loading', identity: null, generation: 0 });
@@ -104,11 +113,18 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     let generation = 0;
     let controller = new AbortController();
     const current = (version: number) => active && version === generation;
+    let committedIdentity: Readonly<SessionIdentity> | null = null;
+    let committedStatus: AuthState['status'] = 'loading';
+    const commit = (next: AuthState) => {
+      committedIdentity = next.identity;
+      committedStatus = next.status;
+      setState(next);
+    };
     const invalidate = (status: 'loading' | 'anonymous') => {
       controller.abort();
       controller = new AbortController();
       generation++;
-      setState({ status, identity: null, generation });
+      commit({ status, identity: null, generation });
       return generation;
     };
     invalidateLogout.current = () => { invalidate('anonymous'); };
@@ -127,15 +143,47 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
           default: next = { status: 'unavailable', identity: null, generation: version };
         }
         if (current(version)) {
-          setState(next);
+          commit(next);
           if (next.status === 'verified') setLogoutError(null);
         }
       } catch (error) {
-        // The network/JSON boundary fails closed, including SDK/storage restrictions.
-        if (current(version)) setState({ status: 'unavailable', identity: null, generation: version });
+        if (current(version)) commit({ status: 'unavailable', identity: null, generation: version });
       }
     };
     let unsubscribe = () => {};
+    const applyVerifiedResponse = async (version: number): Promise<AuthState | null> => {
+      const response = await fetch('/api/rights/session', {
+        credentials: 'same-origin', cache: 'no-store',
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+      });
+      switch (response.status) {
+        case 200: return { status: 'verified', identity: parseIdentity(await response.json()), generation: version };
+        case 401: return { status: 'anonymous', identity: null, generation: version };
+        case 403: return { status: 'ineligible', identity: null, generation: version };
+        default: return { status: 'unavailable', identity: null, generation: version };
+      }
+    };
+    const refreshWithoutRemount = async (baseline: number) => {
+      // Tab refocus fires TOKEN_REFRESHED with the same identity; re-verify in the
+      // background and only bump generation when the identity actually changed.
+      let next: AuthState;
+      try {
+        const resolved = await applyVerifiedResponse(baseline);
+        if (resolved === null || !current(baseline)) return;
+        next = resolved;
+      } catch (error) {
+        // The network/JSON boundary fails closed, including SDK/storage restrictions.
+        if (!current(baseline)) return;
+        next = { status: 'unavailable', identity: null, generation: baseline };
+      }
+      if (!current(baseline)) return;
+      if (next.status === committedStatus && sameIdentity(next.identity, committedIdentity)) return;
+      controller.abort();
+      controller = new AbortController();
+      generation = baseline + 1;
+      commit({ ...next, generation });
+      if (next.status === 'verified') setLogoutError(null);
+    };
     try {
       const { data } = createClient().auth.onAuthStateChange((event) => {
         if (!active || event === 'INITIAL_SESSION') return;
@@ -144,8 +192,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
           if (pendingLogout.current || event !== 'SIGNED_IN') return;
           logoutBlocked.current = false;
         }
-        const version = invalidate(event === 'SIGNED_OUT' ? 'anonymous' : 'loading');
-        if (event !== 'SIGNED_OUT') queueMicrotask(() => { void verify(version); });
+        if (event === 'SIGNED_OUT' || event === 'SIGNED_IN') {
+          const version = invalidate(event === 'SIGNED_OUT' ? 'anonymous' : 'loading');
+          if (event !== 'SIGNED_OUT') queueMicrotask(() => { void verify(version); });
+          return;
+        }
+        queueMicrotask(() => { void refreshWithoutRemount(generation); });
       });
       unsubscribe = () => data.subscription.unsubscribe();
       void verify(generation);

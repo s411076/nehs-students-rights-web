@@ -68,6 +68,8 @@ npm run test:e2e
 
 ## How It Works
 
+**Moderation stays inline, with no separate backend page.** Administrators reply to, delete, and look up feedback authors on `/feedback`; proposal approval/rejection, status/reply editing, comment deletion, and author lookup stay on `/proposals`. Home-section creation/deletion stays on `/`. `/admin` and its feedback-list API have been removed and return 404.
+
 **Server-first identity verification.** Every request re-verifies with `getUser()` against the Auth server, accepting only confirmed full-domain `nehs.hc.edu.tw` addresses (`lib/auth/server.ts`); admin identity calls the caller-only `rights_is_admin` RPC, without enumerating the membership table. The database checks current school eligibility and protected, uniquely constrained administrator membership. `proxy.ts` only forwards refreshes, with no authorization caching.
 
 **All writes go through a 13-action POST allowlist.** `POST /api/rights/actions` (`lib/rights/server-actions.ts`) accepts only 4 student actions (`createProposal`, `createFeedback`, `addComment`, `setVote`) and 9 admin actions (proposal review, comment deletion, reply saving, announcement management, and more); the request body is parsed strictly with `parseActionRequest`, with the request Origin, JSON media type, and the 65536-byte limit all enforced inside the guards. `setVote` is desired-state and idempotent: historical votes stay an immutable baseline and new ballots start per user, so totals never rewrite history and old ledgers are never double-counted. Each mutation derives a UUID and records display attribution privately in the database.
@@ -86,7 +88,6 @@ app/
   proposals/page.tsx     Proposal list, comments, petition votes
   feedback/page.tsx      Anonymous feedback
   profile/page.tsx       Profile page (verified identity only, no proposal queries)
-  admin/page.tsx         Admin panel behind the server gate
   auth/callback/page.tsx OAuth callback completion page
   api/rights/
     actions/route.ts     13-action POST allowlist
@@ -96,7 +97,7 @@ app/
 components/
   AuthProvider.tsx       Generation-guarded identity provider
   Navbar.tsx             Synced identity, fail-closed logout
-  admin/                 Admin panel client components
+  admin/                 Guarded inline author lookup
 lib/
   auth/                  Server verification, types, OAuth completion
   rights/                Contracts, validation, projections, server actions, RPC reads, client

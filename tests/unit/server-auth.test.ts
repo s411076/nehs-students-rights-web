@@ -28,7 +28,7 @@ test('denies forged admin session when token is invalid before any private query
 });
 
 test('denies absent session when privileged authorization is requested', async () => {
-  const { supabase } = createRouteHandlerClient(new NextRequest('http://localhost/admin'));
+  const { supabase } = createRouteHandlerClient(new NextRequest('http://localhost/feedback'));
   await expect(requireAdmin(supabase)).rejects.toMatchObject({ status: 401 });
   expect(fixture.data.requests).toEqual([]);
 });

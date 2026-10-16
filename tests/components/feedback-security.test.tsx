@@ -406,7 +406,7 @@ test('resolves an off-page feedback hash through the visibility-checked item end
   const request = calls.find(call => call.url.includes('/api/rights/items'));
   expect(new URL(request?.url ?? '', 'http://localhost').searchParams.get('kind')).toBe('feedback');
   expect(new URL(request?.url ?? '', 'http://localhost').searchParams.get('id')).toBe('fb-2');
-  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+  await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
 });
 
 test.each([studentAuth, adminAuth])('keeps public anonymous attribution redacted before deliberate admin reveal (%s)', async auth => {

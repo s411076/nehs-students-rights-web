@@ -34,7 +34,7 @@ function installFetch(mutate: () => Promise<Response> | Response) {
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
-const vote = (id = 'p1') => within(screen.getByText(id).closest('div.p-5') ?? document.body).getByRole('button', { name: /👍/ });
+const vote = (id = 'p1') => within(screen.getByText(id).closest('div.p-5') ?? document.body).getByRole('button', { name: /覆議\/聯署|已聯署/ });
 beforeEach(() => {
   login(); state.count = 4; state.voted = false; localStorage.clear();
   window.history.replaceState(null, '', '/proposals');

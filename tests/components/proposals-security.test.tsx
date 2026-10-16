@@ -166,9 +166,9 @@ test('validates overlong comments with the shared validator before any mutation'
 });
 
 test.each([
-   ['approveProposal', '✅ 核可發布', { id: 'pending', expectedVersion: 1 }],
-   ['rejectProposal', '❌ 退回提案', { id: 'pending', expectedVersion: 1 }],
-   ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply', expectedVersion: 1 }],
+   ['approveProposal', '核可發布', { id: 'pending', expectedVersion: 1 }],
+   ['rejectProposal', '退回提案', { id: 'pending', expectedVersion: 1 }],
+   ['updateProposalControl', '儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply', expectedVersion: 1 }],
    ['deleteProposal', '刪除', { id: 'p1', expectedVersion: 1 }],
    ['deleteComment', /刪除留言/, { id: 'c1', proposalId: 'p1', expectedVersion: 1 }],
 ] as const)('routes admin %s through the allowlisted helper', async (action, button, payload) => {
@@ -187,7 +187,7 @@ test.each([true, false])('requires confirmation before clearing an existing offi
   render(<ProposalsPage />);
   fireEvent.change(await screen.findByPlaceholderText('輸入官方回覆內容...'), { target: { value: '  ' } });
   // When
-  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
   // Then
   expect(window.confirm).toHaveBeenCalled();
    if (confirmed) await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'updateProposalControl', payload: { id: 'p1', status: '研議中', reply: '', expectedVersion: 1 } }, expect.any(Function)));
@@ -442,12 +442,12 @@ test('retains control draft baseVersion when newer proposal content is reloaded'
   const input = await screen.findByPlaceholderText('輸入官方回覆內容...');
   // When
   fireEvent.change(input, { target: { value: 'My unreconciled reply' } });
-  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
   await screen.findByRole('alert');
   state.publicRead.mockResolvedValue({ data: [{ ...state.publicRows[0], version: 2, reply: 'New server reply' }], error: null });
   fireEvent.click(screen.getByRole('button', { name: '重新載入最新資料' }));
   await screen.findByText('New server reply');
-  fireEvent.click(screen.getByRole('button', { name: '💾 儲存修改' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
   // Then
   await waitFor(() => expect(state.requests).toHaveBeenCalledTimes(2));
   expect(input).toHaveValue('My unreconciled reply');

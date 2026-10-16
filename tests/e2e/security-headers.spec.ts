@@ -1,15 +1,13 @@
-import { test, expect } from '@playwright/test';
-import { seedSessionCookies } from '../fixtures/browser-auth';
+import { test, expect, login } from '../fixtures/security-flow';
 
 const EXPECTED_CSP = "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'";
 
 test('security headers present on live responses while hydration and auth still work', async ({ page, context, request, baseURL }) => {
   const fixtureURL = process.env.FIXTURE_URL;
   if (!fixtureURL || !baseURL) throw new TypeError('Harness URLs required');
-  await request.post(`${fixtureURL}/__fixture/reset`);
 
   // Live HTTP header assertions against the real Playwright-owned Next server.
-  for (const path of ['/', '/admin', '/api/rights/session', '/api/rights/feedback']) {
+  for (const path of ['/', '/proposals', '/feedback', '/admin', '/api/rights/session', '/api/rights/feedback']) {
     const response = await request.get(`${baseURL}${path}`);
     const headers = response.headers();
     expect(headers['x-frame-options'], path).toBe('DENY');
@@ -35,7 +33,7 @@ test('security headers present on live responses while hydration and auth still 
     if (url.origin === baseURL || url.origin === fixtureURL) blocked.push(`requestfailed: ${req.url()}`);
   });
 
-  await seedSessionCookies(context, { appURL: baseURL, fixtureURL, identity: 'student' });
+  await login(context, 'student');
   await page.goto('/');
   await expect(page.getByText('Offline fixture announcement', { exact: true })).toBeVisible();
 

@@ -1,7 +1,10 @@
 import { notFound, redirect } from 'next/navigation';
 import { AuthorizationError, requireAdmin } from '@/lib/auth/server';
 import { createReadOnlyClient } from '@/lib/supabase/server';
-import { FEEDBACK_SELECT_STRING, toFeedbackAdminDTO } from '@/lib/rights/queries';
+import { toFeedbackAdminDTO } from '@/lib/rights/queries';
+import { parsePage } from '@/lib/rights/pagination';
+import type { FeedbackAdminDTO } from '@/lib/rights/queries';
+import type { PageCursor } from '@/lib/rights/pagination';
 import AdminFeedbackPanel from '@/components/admin/AdminFeedbackPanel';
 
 export const dynamic = 'force-dynamic';
@@ -17,16 +20,15 @@ export default async function AdminPage() {
       </form>
     </section>
   </main>;
-  let result;
+  let result: { readonly ownerId: string; readonly feedback: FeedbackAdminDTO[]; readonly nextCursor: PageCursor | null };
   try {
     const supabase = await createReadOnlyClient();
     const identity = await requireAdmin(supabase);
-    const { data, error } = await supabase.from('feedback').select(FEEDBACK_SELECT_STRING)
-      .order('created_at', { ascending: false }).overrideTypes<unknown[], { merge: false }>();
-    if (error || !Array.isArray(data)) return unavailable;
-    const feedback = data.map(toFeedbackAdminDTO);
-    if (feedback.some(row => row === null)) return unavailable;
-    result = { ownerId: identity.id, feedback: feedback.filter(row => row !== null) };
+    const { data, error } = await supabase.rpc('rights_list_admin_feedback', { p_limit: 20, p_cursor: null });
+    if (error) return unavailable;
+    const page = parsePage(data, toFeedbackAdminDTO);
+    if (!page) return unavailable;
+    result = { ownerId: identity.id, feedback: page.items, nextCursor: page.nextCursor };
   } catch (error) {
     if (error instanceof AuthorizationError) {
       if (error.status === 401) redirect('/');

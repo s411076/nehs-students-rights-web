@@ -104,7 +104,7 @@ test('permits same-origin student creation through the real dispatcher when tran
   const response = await guardedTransportSeam(request);
   // Then the provider mutation retains the student's server-derived attribution.
   expect({ status: response.status, writes: fixture.data.counters.total }).toEqual({ status: 200, writes: 1 });
-  expect(fixture.data.tables.proposals.at(-1)).toEqual({ id: 'insert-1', title: '[其他] Origin sensitivity',
+  expect(fixture.data.tables.proposals.at(-1)).toMatchObject({ title: '[其他] Origin sensitivity',
     content: 'control body', author_name: 'Fixture student', status: '待審核', upvotes_count: 0 });
 });
 
@@ -114,12 +114,12 @@ test('denies same-origin student admin mutation when dispatcher authorization re
   const request = new NextRequest('http://localhost/api/rights/actions', {
     method: 'POST', headers: { cookie: seeded.headers.get('cookie') ?? '', origin: 'http://localhost',
       'x-requested-with': REQUESTED_WITH_HEADER, 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'saveFeedbackReply', payload: { id: 'feedback-1', reply: 'forbidden' } }),
+    body: JSON.stringify({ action: 'saveFeedbackReply', payload: { id: 'feedback-1', reply: 'forbidden', expectedVersion: 1 } }),
   });
   // When the real dispatcher verifies school identity and admin membership.
   const response = await guardedTransportSeam(request);
   // Then the student has not been upgraded to a fixture admin and cannot write.
   expect({ status: response.status, writes: fixture.data.counters.total }).toEqual({ status: 403, writes: 0 });
   expect(fixture.data.requests.some(entry => entry.path === '/auth/v1/user')).toBe(true);
-  expect(fixture.data.requests.some(entry => entry.path.startsWith('/rest/v1/admins'))).toBe(true);
+  expect(fixture.data.requests.some(entry => entry.path.startsWith('/rest/v1/rpc/rights_is_admin'))).toBe(true);
 });

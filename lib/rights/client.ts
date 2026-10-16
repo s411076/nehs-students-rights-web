@@ -1,8 +1,9 @@
 import { GENERIC_MESSAGES, REQUESTED_WITH_HEADER, RESULT_CODES, RIGHTS_ACTIONS_PATH, makeFailure } from './contracts';
 import type { RightsActionRequest, RightsFailure, RightsResult } from './contracts';
+import { parseMutationReceipt, type MutationReceipt } from './receipts';
 
 export type ClientMutationResult =
-  | { readonly ok: true; readonly data: unknown; readonly refresh: 'updated' | 'failed'; readonly message?: string }
+  | { readonly ok: true; readonly data: MutationReceipt; readonly refresh: 'updated' | 'failed'; readonly message?: string }
   | RightsFailure
   | { readonly ok: false; readonly code: 'OUTCOME_UNKNOWN'; readonly message: string };
 
@@ -16,12 +17,14 @@ function parseResult(value: unknown): RightsResult<unknown> | null {
   return null;
 }
 
-export async function readRights<T>(path: string, parse: (data: unknown) => T): Promise<RightsResult<T>> {
+export async function readRights<T>(path: string, parse: (data: unknown) => T | null): Promise<RightsResult<T>> {
   try {
     const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
     const result = parseResult(await response.json());
     if (!result || response.ok !== result.ok) return makeFailure('UNAVAILABLE');
-    return result.ok ? { ok: true, data: parse(result.data) } : result;
+    if (!result.ok) return result;
+    const parsed = parse(result.data);
+    return parsed === null ? makeFailure('UNAVAILABLE') : { ok: true, data: parsed };
   } catch { return makeFailure('UNAVAILABLE'); }
 }
 
@@ -40,15 +43,17 @@ export async function sendRightsAction(request: RightsActionRequest, refresh?: (
   // messages; only transport/ambiguous outcomes (network/timeout/shape
   // mismatch/503 UNAVAILABLE) collapse to OUTCOME_UNKNOWN. Fail-closed: never retry.
   if (!result.ok) return result.code === 'UNAVAILABLE' ? unknownOutcome() : result;
+  const receipt = parseMutationReceipt(result.data, request);
+  if (receipt === null) return unknownOutcome();
   if (refresh) {
     try {
       const refreshed: unknown = await refresh();
       if (typeof refreshed === 'object' && refreshed !== null && 'ok' in refreshed && refreshed.ok === false) {
-        return { ok: true, data: result.data, refresh: 'failed', message: '已儲存，但清單更新失敗' };
+        return { ok: true, data: receipt, refresh: 'failed', message: '已儲存，但清單更新失敗' };
       }
-    } catch { return { ok: true, data: result.data, refresh: 'failed', message: '已儲存，但清單更新失敗' }; }
+    } catch { return { ok: true, data: receipt, refresh: 'failed', message: '已儲存，但清單更新失敗' }; }
   }
-  return { ok: true, data: result.data, refresh: 'updated' };
+  return { ok: true, data: receipt, refresh: 'updated' };
 }
 
 function unknownOutcome(): ClientMutationResult {

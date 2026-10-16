@@ -16,29 +16,18 @@ const sdk = vi.hoisted(() => {
   function resolveTable(table: string): Promise<{ data: unknown; error: unknown }> {
     store.callCounts[table] = (store.callCounts[table] ?? 0) + 1;
     const raw = store.tables[table];
-    const entry =
-      typeof raw === 'function' ? (raw as (call: number) => unknown)(store.callCounts[table]) : raw;
-    if (entry && typeof entry === 'object' && 'deferred' in (entry as Record<string, unknown>)) {
+    const entry: unknown = typeof raw === 'function' ? raw(store.callCounts[table]) : raw;
+    if (entry && typeof entry === 'object' && 'deferred' in entry) {
       return new Promise((resolve) => {
-        (store.pending[table] ??= []).push(
-          resolve as (value: { data: unknown; error: unknown }) => void,
-        );
+        const pending = store.pending[table] ?? [];
+        store.pending[table] = pending;
+        pending.push(resolve);
       });
     }
-    if (entry && typeof entry === 'object' && 'error' in (entry as Record<string, unknown>)) {
-      return Promise.resolve({ data: null, error: (entry as { error: unknown }).error });
+    if (entry && typeof entry === 'object' && 'error' in entry) {
+      return Promise.resolve({ data: null, error: entry.error });
     }
-    return Promise.resolve({ data: (entry as unknown[] | undefined) ?? [], error: null });
-  }
-  function terminal(table: string): Record<string, unknown> {
-    const next: Record<string, unknown> = {};
-    next.order = () => terminal(table);
-    next.eq = () => terminal(table);
-    next.in = () => terminal(table);
-    next.limit = () => terminal(table);
-    next.then = (onFulfilled: never, onRejected: never) =>
-      resolveTable(table).then(onFulfilled, onRejected);
-    return next;
+    return Promise.resolve({ data: entry ?? [], error: null });
   }
   const client = {
     auth: {
@@ -52,17 +41,10 @@ const sdk = vi.hoisted(() => {
     },
     from: (table: string) => {
       store.fromTables.push(table);
-      return {
-        select: (selection?: string) => {
-          store.selects.push(`${table}:${selection ?? ''}`);
-          return terminal(table);
-        },
-        insert: async () => ({ data: null, error: null }),
-        delete: () => ({ eq: async () => ({ data: null, error: null }) }),
-      };
+      throw new TypeError('Browser database access is forbidden');
     },
   };
-  return { store, client };
+  return { store, client, resolveTable };
 });
 const authState = vi.hoisted(() => ({
   real: false,
@@ -99,7 +81,10 @@ function motionPreference(matches = false) {
 
 vi.mock('../../components/AuthProvider', async importOriginal => {
   const actual = await importOriginal<typeof import('../../components/AuthProvider')>();
-  return { ...actual, useAuth: () => authState.real ? actual.useAuth() : authState.value };
+  return { ...actual, useAuth: () => {
+    const useSelectedAuth = authState.real ? actual.useAuth : () => authState.value;
+    return useSelectedAuth();
+  } };
 });
 vi.mock('@/lib/supabase', () => ({ createClient: () => sdk.client }));
 vi.mock('canvas-confetti', () => ({ default: vi.fn() }));
@@ -119,29 +104,48 @@ function asAnonymous(generation = 0) {
 
 const publicProposal = () => ({
   id: 'p-1', title: '鞦韆整修提案', content: '操場鞦韆需要整修',
-  author_name: '王小明', status: '研議中', upvotes_count: 3, reply: '', created_at: '2026-01-01T00:00:00Z',
+   author_name: '王小明', status: '研議中', upvotes_count: 3, reply: '', created_at: '2026-01-01T00:00:00Z', version: 1, viewer_voted: false, legacy_upvotes_count: 3,
 });
 const pendingProposal = () => ({ ...publicProposal(), id: 'p-2', title: '鞦韆秘密提案', status: '待審核', upvotes_count: 0 });
 const rejectedProposal = () => ({ ...publicProposal(), id: 'p-3', title: '鞦韆拆除提案', status: '被退回', upvotes_count: 0 });
 const unknownProposal = () => ({ ...publicProposal(), id: 'p-4', title: '鞦韆幽靈提案', status: '已刪除', upvotes_count: 0 });
 const namedFeedback = () => ({
   id: 'f-1', title: '午餐建言', content: '午餐份量不足希望改善', category: '環境與設備',
-  is_anonymous: false, author_name: '李小華', reply: '', replied_at: null, created_at: '2026-02-01T00:00:00Z',
+   is_anonymous: false, author_name: '李小華', reply: '', replied_at: null, created_at: '2026-02-01T00:00:00Z', version: 1,
 });
 const anonFeedback = () => ({
   id: 'f-2', title: '社團經費建言', content: '希望增加社團經費', category: '學聯與活動',
-  is_anonymous: true, reply: '', replied_at: null, created_at: '2026-02-02T00:00:00Z',
+   is_anonymous: true, reply: '', replied_at: null, created_at: '2026-02-02T00:00:00Z', version: 1,
 });
-const section = () => ({ id: 's-1', title: '開學公告', content: '歡迎回來', created_at: '2026-01-05T00:00:00Z' });
+const section = () => ({ id: 's-1', title: '開學公告', content: '歡迎回來', created_at: '2026-01-05T00:00:00Z', version: 1 });
 
 const ACTION_STATUS: Record<string, number> = {
   INVALID_PAYLOAD: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, CONFLICT: 409,
   PAYLOAD_TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, UNAVAILABLE: 503,
 };
 function stubFetch(handler: (url: string, init: RequestInit | undefined) => Response | Promise<Response>) {
-  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
-    handler(String(input), init),
-  );
+  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const parsed = new URL(url, 'http://localhost');
+    const table = parsed.pathname === '/api/rights/proposals' ? 'proposals'
+      : parsed.pathname === '/api/rights/home-sections' ? 'home_sections' : null;
+    if (table) {
+      const result = await sdk.resolveTable(table);
+      if (result.error || !Array.isArray(result.data)) return rightsBody({ ok: false, code: 'UNAVAILABLE' });
+      const query = (parsed.searchParams.get('query') ?? '').toLowerCase();
+      const rows = result.data.filter(row => typeof row === 'object' && row !== null &&
+        (table !== 'proposals' || ('status' in row && ['研議中', '通過', '已採納', '不採納'].includes(String(row.status)))) &&
+        (!query || ('title' in row && String(row.title).toLowerCase().includes(query)) || ('content' in row && String(row.content).toLowerCase().includes(query))));
+      return rightsBody({ ok: true, data: { items: rows, nextCursor: null } });
+    }
+    const response = await handler(url, init);
+    if (parsed.pathname !== '/api/rights/feedback') return response;
+    const body = await response.clone().json();
+    if (!body.ok || !Array.isArray(body.data)) return response;
+    const query = (parsed.searchParams.get('query') ?? '').toLowerCase();
+    return rightsBody({ ok: true, data: { items: body.data.filter((row: { title: string; content: string }) =>
+      !query || row.title.toLowerCase().includes(query) || row.content.toLowerCase().includes(query)), nextCursor: null } });
+  });
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
@@ -219,9 +223,9 @@ test('never queries the admins roster; role comes from the provider', async () =
   stubFetch(() => rightsBody({ ok: true, data: [] }));
   // When the home page loads any list
   render(<HomePage />);
-  await waitFor(() => expect(sdk.store.fromTables.length).toBeGreaterThan(0));
+  await screen.findByText('目前沒有首頁公告。');
   // Then no independent admins roster lookup remains
-  expect(sdk.store.fromTables).not.toContain('admins');
+  expect(sdk.store.fromTables).toEqual([]);
 });
 
 test('hides announcement creation and deletion from ordinary users', async () => {
@@ -248,7 +252,7 @@ test('publishes an announcement once as admin and refreshes the list after confi
   stubFetch((url, init) => {
     if (url.includes('/api/rights/actions')) {
       posted.push(JSON.parse(init?.body as string));
-      return rightsBody({ ok: true, data: { inserted: true } });
+      return rightsBody({ ok: true, data: { inserted: true, id: 'new-section', version: 1 } });
     }
     return rightsBody({ ok: true, data: [] });
   });
@@ -298,7 +302,7 @@ test('reports a denied or zero-row announcement delete without success fiction',
     if (url.includes('/api/rights/actions')) {
       expect(JSON.parse(init?.body as string)).toEqual({
         action: 'deleteHomeSection',
-        payload: { id: 's-1' },
+        payload: { id: 's-1', expectedVersion: 1 },
       });
       return rightsBody({ ok: false, code: 'CONFLICT' });
     }
@@ -437,7 +441,7 @@ test('names the public search field and exposes results as focusable item deep-l
   stubFetch(() => rightsBody({ ok: true, data: [{ ...namedFeedback(), title: '鞦韆建言' }] }));
   render(<HomePage />);
   // When searching through the visibly labelled field
-  fireEvent.change(screen.getByRole('textbox', { name: /搜尋全站提案、建言與留言/ }), { target: { value: '鞦韆' } });
+  fireEvent.change(screen.getByRole('textbox', { name: /搜尋全站提案與建言/ }), { target: { value: '鞦韆' } });
   // Then native links retain both destinations and accept keyboard focus
   const proposal = await screen.findByRole('link', { name: /鞦韆整修提案/ });
   const feedback = await screen.findByRole('link', { name: /鞦韆建言/ });
@@ -534,4 +538,51 @@ test('actual provider preserves root OAuth outcome across a generation-keyed rem
   expect(sdk.client.auth.getSession).toHaveBeenCalledTimes(1);
   expect(sdk.client.auth.getUser).toHaveBeenCalledTimes(1);
   expect(window.location.hash).toBe('#section');
+});
+
+test('queries both complete public sources before paging and appends only the requested search continuation', async () => {
+  // Given
+  asStudent();
+  const cursor = { created_at: '2026-01-01T00:00:00.123456Z', id: 'p-1' };
+  const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/rights/home-sections') return rightsBody({ ok: true, data: { items: [], nextCursor: null } });
+    const more = url.searchParams.has('cursor');
+    const items = url.pathname === '/api/rights/proposals'
+      ? [{ ...publicProposal(), id: more ? 'p-next' : 'p-1', title: more ? '鞦韆第二頁' : '鞦韆整修提案' }]
+      : [{ ...namedFeedback(), title: '鞦韆建言' }];
+    return rightsBody({ ok: true, data: { items, nextCursor: url.pathname === '/api/rights/proposals' && !more ? cursor : null } });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<HomePage />);
+  // When
+  fireEvent.change(screen.getByLabelText(/搜尋全站提案與建言/), { target: { value: '鞦韆' } });
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多提案搜尋結果' }));
+  // Then
+  expect(await screen.findByText('鞦韆第二頁')).toBeVisible();
+  expect(screen.getByText('鞦韆整修提案')).toBeVisible();
+  expect(screen.getByText('鞦韆建言')).toBeVisible();
+  const reads = fetcher.mock.calls.map(([path]) => new URL(String(path), 'http://localhost'))
+    .filter(url => url.pathname !== '/api/rights/home-sections');
+  expect(reads).toHaveLength(3);
+  expect(reads.every(url => url.searchParams.get('query') === '鞦韆' && url.searchParams.get('limit') === '20')).toBe(true);
+  expect(JSON.parse(reads.at(-1)?.searchParams.get('cursor') ?? 'null')).toEqual(cursor);
+  expect(screen.getByText(/已載入搜尋結果/)).toHaveTextContent('3 筆');
+});
+
+test('loads the next announcement page without dropping already rendered announcements', async () => {
+  // Given
+  asStudent();
+  vi.stubGlobal('fetch', async (input: string | URL | Request) => {
+    const more = new URL(String(input), 'http://localhost').searchParams.has('cursor');
+    return rightsBody({ ok: true, data: { items: [{ ...section(), id: more ? 's-2' : 's-1', title: more ? '較早公告' : '開學公告' }],
+      nextCursor: more ? null : { created_at: '2026-01-05T00:00:00Z', id: 's-1' } } });
+  });
+  render(<HomePage />);
+  // When
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多公告' }));
+  // Then
+  expect(await screen.findByText('較早公告')).toBeVisible();
+  expect(screen.getByText('開學公告')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '載入更多公告' })).toBeNull();
 });

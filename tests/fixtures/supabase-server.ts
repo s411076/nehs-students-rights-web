@@ -4,6 +4,9 @@ import { once } from 'node:events';
 import { createFixtureData, fixtureUsers, fakePublishableKey } from './supabase-data.ts';
 import type { FixtureIdentity, Row } from './supabase-data.ts';
 import type { User } from '@supabase/supabase-js';
+import { FixtureRpcError } from './supabase-rpc-common.ts';
+import { readRpc } from './supabase-rpc-reads.ts';
+import { mutateRpc, mutationRpcs } from './supabase-rpc-mutations.ts';
 
 export function fixtureSession(identity: FixtureIdentity = 'student', expired = false) {
   const expires = expired ? 1 : 4102444800;
@@ -43,7 +46,8 @@ export async function startSupabaseFixture(port = 0) {
     if (url.pathname === '/__fixture/health') return send(200, { ready: true });
     if (url.pathname === '/__fixture/reset') {
       data.reset(); failure = null; defaults = false;
-      Object.entries(fixtureUsers).forEach(([identity, user]) => tokens.set(fixtureToken(identity), user));
+      tokens.clear();
+      Object.entries(fixtureUsers).forEach(([identity, user]) => { tokens.set(fixtureToken(identity), user); });
       return send(200, {});
     }
     if (url.pathname === '/__fixture/state') return send(200, data);
@@ -54,10 +58,18 @@ export async function startSupabaseFixture(port = 0) {
       if (typeof body.path === 'string' && typeof body.method === 'string') failure = { path: body.path, method: body.method };
       if (body.clear === true) failure = null;
       if (body.defaults === true) defaults = true;
+      if (typeof body.table === 'string' && Array.isArray(body.rows) && data.tables[body.table]) {
+        const rows: Row[] = body.rows.map(parseRow).map(row => ({ version: 1, ...row }));
+        data.tables[body.table].push(...rows);
+        if (body.table === 'proposals') for (const row of rows) data.legacyVotes.set(String(row.id), Number(row.upvotes_count ?? 0));
+      }
       return send(200, {});
     }
     data.requests.push({ method, path: url.pathname + url.search, token });
     if (request.headers.apikey !== fakePublishableKey) return send(401, { message: 'Invalid fixture key' });
+    if (url.pathname.startsWith('/rest/v1/rpc/rights_') && method === 'POST') {
+      data.rpcCounters[mutationRpcs.has(url.pathname.slice('/rest/v1/rpc/'.length)) ? 'mutation' : 'read']++;
+    }
     if (failure?.path === url.pathname && failure.method === method) return send(400, { message: 'Injected provider failure' });
     const verified = tokens.get(token);
     if (url.pathname === '/auth/v1/logout') return send(200, {});
@@ -71,6 +83,19 @@ export async function startSupabaseFixture(port = 0) {
       tokens.set(access_token, entry[1]);
       return send(200, { access_token, refresh_token: `fixture-refresh-${identity}`, expires_in: 3600, token_type: 'bearer', user: entry[1] });
     }
+    if (url.pathname.startsWith('/rest/v1/rpc/rights_')) {
+      if (method !== 'POST') return send(405, { message: 'RPC requires POST' });
+      const name = url.pathname.slice('/rest/v1/rpc/'.length);
+      const mutation = mutationRpcs.has(name);
+      try {
+        const body = await readBody(request);
+        return send(200, mutation ? mutateRpc(data, name, { body, user: verified }) : readRpc(data, name, { body, user: verified }));
+      } catch (error) {
+        if (error instanceof FixtureRpcError) return send(error.status, { code: error.code, message: error.message, details: null, hint: null });
+        if (error instanceof SyntaxError || error instanceof TypeError) return send(400, { code: 'PT400', message: 'Invalid RPC payload', details: null, hint: null });
+        throw error;
+      }
+    }
     const table = url.pathname.replace('/rest/v1/', '');
     const rows = data.tables[table];
     if (!url.pathname.startsWith('/rest/v1/') || !rows) return send(404, { message: 'Unknown fixture endpoint' });
@@ -80,8 +105,8 @@ export async function startSupabaseFixture(port = 0) {
       if (!verified) return send(401, { message: 'Authenticated token required' });
       // Deliberately NO role/ownership/RLS checks. Application guards must stop students.
       switch (method) {
-        case 'PATCH': { const body = await readBody(request); selected.forEach(row => Object.assign(row, body)); data.counters.update++; break; }
-        case 'DELETE': data.tables[table] = rows.filter(row => !selected.includes(row)); data.counters.delete++; break;
+        case 'PATCH': { const body = await readBody(request); selected.forEach(row => { Object.assign(row, body); }); if (selected.length) data.counters.update++; break; }
+        case 'DELETE': data.tables[table] = rows.filter(row => !selected.includes(row)); if (selected.length) data.counters.delete++; break;
         case 'POST': {
           const body = await readJson(request);
           const inserted = (Array.isArray(body) ? body : [body]).map(parseRow).map(row => ({
@@ -93,7 +118,7 @@ export async function startSupabaseFixture(port = 0) {
         }
         default: return send(405, { message: 'Unsupported fixture method' });
       }
-      data.counters.total++;
+      if (method === 'POST' || selected.length) data.counters.total++;
       if (!request.headers.prefer?.includes('return=representation')) return send(200, null);
     }
     const order = url.searchParams.get('order');

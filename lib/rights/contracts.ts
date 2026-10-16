@@ -43,7 +43,7 @@ export const ENDPOINTS = {
 
 export const REQUESTED_WITH_HEADER = 'nehs-web';
 
-export type StudentActionName = 'createProposal' | 'createFeedback' | 'addComment' | 'setVoteCount';
+export type StudentActionName = 'createProposal' | 'createFeedback' | 'addComment' | 'setVote';
 export type AdminActionName =
   | 'updateProposalControl'
   | 'approveProposal'
@@ -60,7 +60,7 @@ export const STUDENT_ACTIONS: readonly StudentActionName[] = [
   'createProposal',
   'createFeedback',
   'addComment',
-  'setVoteCount',
+  'setVote',
 ];
 
 export const ADMIN_ACTIONS: readonly AdminActionName[] = [
@@ -93,24 +93,28 @@ export interface AddCommentPayload {
   content: string;
   isAnonymous: boolean;
 }
-export interface SetVoteCountPayload {
+export interface SetVotePayload {
   proposalId: string;
-  count: number;
+  voted: boolean;
 }
 export interface UpdateProposalControlPayload {
   id: string;
+  expectedVersion: number;
   status: ControlStatus;
   reply: string;
 }
 export interface IdOnlyPayload {
   id: string;
+  expectedVersion: number;
 }
 export interface DeleteCommentPayload {
   id: string;
+  expectedVersion: number;
   proposalId: string;
 }
 export interface SaveFeedbackReplyPayload {
   id: string;
+  expectedVersion: number;
   reply: string;
 }
 export interface CreateHomeSectionPayload {
@@ -122,7 +126,7 @@ export type RightsActionRequest =
   | { action: 'createProposal'; payload: CreateProposalPayload }
   | { action: 'createFeedback'; payload: CreateFeedbackPayload }
   | { action: 'addComment'; payload: AddCommentPayload }
-  | { action: 'setVoteCount'; payload: SetVoteCountPayload }
+  | { action: 'setVote'; payload: SetVotePayload }
   | { action: 'updateProposalControl'; payload: UpdateProposalControlPayload }
   | { action: 'approveProposal'; payload: IdOnlyPayload }
   | { action: 'rejectProposal'; payload: IdOnlyPayload }

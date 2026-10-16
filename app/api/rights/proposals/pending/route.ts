@@ -1,26 +1,3 @@
-import 'server-only';
 import type { NextRequest } from 'next/server';
-import { requireAdmin } from '@/lib/auth/server';
-import { createRouteHandlerClient } from '@/lib/supabase/server';
-import { makeFailure, makeSuccess, PENDING_STATUS } from '@/lib/rights/contracts';
-import { PROPOSAL_SELECT_STRING, toProposalDTO } from '@/lib/rights/queries';
-import { rightsException, rightsResponse } from '@/lib/rights/server-actions';
-
-export async function GET(request: NextRequest) {
-  let context: ReturnType<typeof createRouteHandlerClient> | undefined;
-  try {
-    context = createRouteHandlerClient(request);
-    await requireAdmin(context.supabase);
-    const { data, error } = await context.supabase.from('proposals').select(PROPOSAL_SELECT_STRING)
-      .eq('status', PENDING_STATUS).order('created_at', { ascending: false });
-    const rows: unknown = data;
-    if (error || !Array.isArray(rows)) return context.applyToResponse(rightsResponse(makeFailure('UNAVAILABLE')));
-    const projection = rows.map(toProposalDTO);
-    if (projection.some(row => row === null)) return context.applyToResponse(rightsResponse(makeFailure('UNAVAILABLE')));
-    return context.applyToResponse(rightsResponse(makeSuccess(projection)));
-  } catch (error) {
-    const response = rightsResponse(rightsException(error));
-    try { return context ? context.applyToResponse(response) : response; }
-    catch { return rightsResponse(makeFailure('UNAVAILABLE')); }
-  }
-}
+import { rightsReadRoute } from '@/lib/rights/server-reads';
+export function GET(request: NextRequest) { return rightsReadRoute(request, 'pending'); }

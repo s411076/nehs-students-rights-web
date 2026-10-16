@@ -42,46 +42,46 @@ export default function AuthCallbackPage() {
 
   if (view === 'success') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-24">
-        <h2 className="text-xl font-semibold text-gray-700">登入成功！正在前往首頁…</h2>
-      </div>
+      <main className="flex min-h-dvh flex-col items-center justify-center p-6 text-center sm:p-12">
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入成功！正在前往首頁…</h2>
+      </main>
     )
   }
 
   if (view === 'ineligible') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-24 text-center">
-        <h2 className="text-xl font-semibold text-gray-700">無法使用登入功能</h2>
-        <p role="alert" className="text-sm text-gray-500">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center sm:p-12">
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">無法使用登入功能</h2>
+        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-slate-400">
           此帳號不是已確認的學校帳號（限 @nehs.hc.edu.tw）。公開內容仍可瀏覽，請使用學校帳號重新登入。
         </p>
-        <a href="/" className="text-sm font-bold text-blue-600 underline">
+        <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
           回首頁
         </a>
-      </div>
+      </main>
     )
   }
 
   if (view === 'failure') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-24 text-center">
-        <h2 className="text-xl font-semibold text-gray-700">登入失敗</h2>
-        <p role="alert" className="text-sm text-gray-500">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center sm:p-12">
+        <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入失敗</h2>
+        <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-slate-400">
           登入未完成或連結已失效（例如重複使用的登入連結），請回首頁重新登入。
         </p>
-        <a href="/" className="text-sm font-bold text-blue-600 underline">
+        <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
           回首頁重新登入
         </a>
-      </div>
+      </main>
     )
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h2 className="text-xl font-semibold text-gray-700">登入驗證中…</h2>
-      <p role="status" className="mt-2 text-sm text-gray-500">
+    <main className="flex min-h-dvh flex-col items-center justify-center p-6 text-center sm:p-12">
+      <h2 className="text-xl font-semibold text-gray-700 dark:text-slate-200">登入驗證中…</h2>
+      <p role="status" className="mt-2 text-sm text-gray-500 dark:text-slate-400">
         正在確認學校帳號登入狀態，請稍候。
       </p>
-    </div>
+    </main>
   )
 }

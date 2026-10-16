@@ -1,4 +1,6 @@
-import { test, expect, login } from '../fixtures/security-flow';
+import { test, expect, login, appURL } from '../fixtures/security-flow';
+
+test.use({ baseURL: appURL, trace: 'off' });
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 

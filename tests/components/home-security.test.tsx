@@ -427,6 +427,26 @@ test('keeps the login button stationary with no motion timers', async () => {
   vi.useRealTimers();
 });
 
+test('offers recent searches with a clear control', async () => {
+  // Given a cleared local history and a submitted keyword
+  window.localStorage.clear();
+  stubFetch(() => rightsBody({ ok: true, data: [] }));
+  render(<HomePage />);
+  const box = screen.getByRole('textbox', { name: /搜尋全站提案與建言/ });
+  fireEvent.change(box, { target: { value: '午餐' } });
+  const form = box.closest('form');
+  expect(form).not.toBeNull();
+  fireEvent.submit(form!);
+  // When the field is emptied, the recent keyword returns as a shortcut
+  fireEvent.change(box, { target: { value: '' } });
+  expect(screen.getByRole('button', { name: '午餐' })).toBeInTheDocument();
+  // And clearing removes the shortcut without touching the field label
+  fireEvent.click(screen.getByRole('button', { name: '清除' }));
+  expect(screen.queryByRole('button', { name: '午餐' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: /搜尋全站提案與建言/ })).toBeInTheDocument();
+  window.localStorage.clear();
+});
+
 test('names the public search field and exposes results as focusable item deep-links', async () => {
   // Given public proposals and feedback matching the same keyword
   sdk.store.tables.proposals = [publicProposal()];

@@ -169,7 +169,7 @@ test.each([
    ['approveProposal', '✅ 核可發布', { id: 'pending', expectedVersion: 1 }],
    ['rejectProposal', '❌ 退回提案', { id: 'pending', expectedVersion: 1 }],
    ['updateProposalControl', '💾 儲存修改', { id: 'p1', status: '研議中', reply: 'Official reply', expectedVersion: 1 }],
-   ['deleteProposal', '🗑️ 刪除', { id: 'p1', expectedVersion: 1 }],
+   ['deleteProposal', '刪除', { id: 'p1', expectedVersion: 1 }],
    ['deleteComment', /刪除留言/, { id: 'c1', proposalId: 'p1', expectedVersion: 1 }],
 ] as const)('routes admin %s through the allowlisted helper', async (action, button, payload) => {
   // Given

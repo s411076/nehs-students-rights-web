@@ -37,6 +37,8 @@ export default function ProposalsPage() {
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [commentAnon, setCommentAnon] = useState<{ [key: string]: boolean }>({});
   const [commentsMap, setCommentsMap] = useState<Record<string, CommentDTO[]>>({});
+  const [commentsStatus, setCommentsStatus] = useState<Record<string, "loading" | "ready" | "error">>({});
+  const scrolledHash = useRef("");
   const [upvotesMap, setUpvotesMap] = useState<{ [key: string]: number }>({});
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const verifiedUserId = auth.status === "verified" ? auth.identity?.id : undefined;
@@ -62,8 +64,9 @@ export default function ProposalsPage() {
   }, [verifiedUserId, generation]);
 
   const fetchComments = useCallback(async (proposalIds: string[]) => {
-    if (!proposalIds.length) { setCommentsMap({}); return { ok: true }; }
+    if (!proposalIds.length) { setCommentsMap({}); setCommentsStatus({}); return { ok: true }; }
     const version = currentAuth.current.generation;
+    setCommentsStatus(current => ({ ...current, ...Object.fromEntries(proposalIds.map(id => [id, "loading" as const])) }));
     try {
       const { data, error } = await supabase
         .from("proposal_comments")
@@ -72,26 +75,29 @@ export default function ProposalsPage() {
         .order("created_at", { ascending: true });
 
       if (error) throw error;
-      if (mounted.current && currentAuth.current.generation === version && data) {
-        const grouped: Record<string, CommentDTO[]> = {};
-        data.forEach((row) => {
+      if (mounted.current && currentAuth.current.generation === version) {
+        const grouped: Record<string, CommentDTO[]> = Object.fromEntries(proposalIds.map(id => [id, []]));
+        (data ?? []).forEach((row) => {
           const c = toCommentDTO(row);
           if (!c || !proposalIds.includes(c.proposal_id)) return;
           if (!grouped[c.proposal_id]) grouped[c.proposal_id] = [];
           grouped[c.proposal_id].push(c);
         });
-        setCommentsMap(grouped);
+        setCommentsMap(current => ({ ...current, ...grouped }));
+        setCommentsStatus(current => ({ ...current, ...Object.fromEntries(proposalIds.map(id => [id, "ready" as const])) }));
       }
       return { ok: true };
     } catch {
-      if (mounted.current && currentAuth.current.generation === version) setErrorMessage("留言清單更新失敗，請重新整理。");
+      if (mounted.current && currentAuth.current.generation === version) {
+        setCommentsStatus(current => ({ ...current, ...Object.fromEntries(proposalIds.map(id => [id, "error" as const])) }));
+      }
       return makeFailure("UNAVAILABLE");
     }
   }, [supabase]);
 
   const fetchProposals = useCallback(async () => {
     const version = currentAuth.current.generation;
-    setPublicListStatus("loading");
+    setPublicListStatus(current => current === "ready" ? current : "loading");
     try {
     const { data, error } = await supabase
       .from("proposals")
@@ -114,8 +120,8 @@ export default function ProposalsPage() {
         return item.id;
       });
 
-      setStatusInputs(initialStatuses);
-      setReplyInputs(initialReplies);
+      setStatusInputs(current => ({ ...initialStatuses, ...current }));
+      setReplyInputs(current => ({ ...initialReplies, ...current }));
       setUpvotesMap(initialUpvotes);
       setPublicListStatus("ready");
       return await fetchComments(pIds);
@@ -130,7 +136,7 @@ export default function ProposalsPage() {
   const fetchPending = useCallback(async () => {
     const version = currentAuth.current.generation;
     if (!currentAuth.current.isAdmin) return { ok: true };
-    setPendingListStatus("loading");
+    setPendingListStatus(current => current === "ready" ? current : "loading");
     try {
     const result = await readRights(RIGHTS_PENDING_PATH, parseProposals);
     if (!mounted.current || currentAuth.current.generation !== version || !currentAuth.current.isAdmin) return result;
@@ -167,6 +173,16 @@ export default function ProposalsPage() {
     setPendingListStatus("loading");
     if (isAdmin) void fetchPending();
   }, [isAdmin, generation, fetchPending]);
+
+  useEffect(() => {
+    if (auth.status === "loading") return;
+    if (isAdmin && pendingListStatus === "loading") return;
+    if (publicProposals.some(item => !commentsStatus[item.id] || commentsStatus[item.id] === "loading")) return;
+    const hash = window.location.hash;
+    if (hash === scrolledHash.current || ![...publicProposals, ...pendingProposals].some(item => hash === `#item-${item.id}`)) return;
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" });
+    scrolledHash.current = hash;
+  }, [publicProposals, pendingProposals, pendingListStatus, commentsStatus, isAdmin, auth.status]);
 
   const mutate = async (request: unknown, afterSuccess?: () => void) => {
     if (flight.current) return;
@@ -331,22 +347,22 @@ export default function ProposalsPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {errorMessage && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-700">{errorMessage}</p>}
-      {loadErrors && <p role="alert" className="p-3 rounded-xl bg-red-50 text-red-700">{loadErrors}</p>}
+      {errorMessage && <p role="alert" className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-400">{errorMessage}</p>}
+      {loadErrors && <p role="alert" className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-400">{loadErrors}</p>}
       <fieldset disabled={pendingAction} className="contents">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-200 flex items-center gap-2">
             💡 學生提案區
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
             發起關於校園生活與權益的提案，獲得同學支持與學權組關注！
           </p>
         </div>
 
         {isAdmin && (
           <div className="shrink-0 self-start sm:self-center">
-            <span className="px-3 py-1.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full border border-purple-200">
+            <span className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs font-semibold rounded-full border border-purple-200 dark:border-slate-700">
               🔑 您目前為學權組管理員
             </span>
           </div>
@@ -354,45 +370,50 @@ export default function ProposalsPage() {
       </div>
 
       {isAdmin && (
-        <div className="bg-amber-50/60 border-2 border-amber-300 rounded-2xl p-6 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between border-b border-amber-200 pb-3">
-            <h2 className="text-base font-bold text-amber-900 flex items-center gap-2">
+        <div className="bg-amber-50/60 dark:bg-slate-900 border-2 border-amber-300 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-sm">
+          <div className="flex flex-wrap gap-2 items-center justify-between border-b border-amber-200 dark:border-slate-800 pb-3">
+            <h2 className="text-base font-bold text-amber-900 dark:text-amber-300 flex items-center gap-2">
               ⏳ 待審核提案區 {pendingListStatus === "ready" ? `(${pendingProposals.length})` : ""}
             </h2>
-            <span className="text-xs text-amber-700 font-medium">僅管理員可見此區塊</span>
+            <span className="text-xs text-amber-700 dark:text-slate-400 font-medium">僅管理員可見此區塊</span>
           </div>
 
-          {pendingListStatus === "loading" ? (
-            <p role="status" className="text-xs text-amber-700 text-center py-4">待審核提案載入中…</p>
-          ) : pendingListStatus === "error" ? (
-            <button type="button" onClick={() => runEvent(fetchPending)} className="px-3 py-1.5 bg-white text-amber-900 text-xs font-medium rounded-lg">重試待審核提案</button>
+          {pendingListStatus === "error" && pendingProposals.length > 0 && (
+            <button type="button" onClick={() => runEvent(fetchPending)} className="px-3 py-1.5 bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 text-xs font-medium rounded-lg">重試待審核提案</button>
+          )}
+          {pendingListStatus === "loading" && pendingProposals.length === 0 ? (
+            <p role="status" className="text-xs text-amber-700 dark:text-slate-400 text-center py-4">待審核提案載入中…</p>
+          ) : pendingListStatus === "error" && pendingProposals.length === 0 ? (
+            <button type="button" onClick={() => runEvent(fetchPending)} className="px-3 py-1.5 bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 text-xs font-medium rounded-lg">重試待審核提案</button>
           ) : pendingProposals.length === 0 ? (
-            <p className="text-xs text-amber-700 text-center py-4">目前尚無等待審核的提案。</p>
+            <p className="text-xs text-amber-700 dark:text-slate-400 text-center py-4">目前尚無等待審核的提案。</p>
           ) : (
             pendingProposals.map((item) => (
-              <div key={item.id} className="p-4 bg-white rounded-xl border border-amber-200 shadow-sm space-y-2">
+              <div key={item.id} id={`item-${item.id}`} className="scroll-mt-20 p-4 bg-white dark:bg-slate-800 rounded-xl border border-amber-200 dark:border-slate-700 shadow-sm space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded-full">
+                  <span className="px-2.5 py-0.5 bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-xs font-semibold rounded-full">
                     待審核
                   </span>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-gray-400 dark:text-slate-400">
                     {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
                   </span>
                 </div>
-                <h3 className="text-base font-bold text-gray-900">{item.title}</h3>
-                <p className="text-sm text-gray-700 whitespace-pre-line">{item.content}</p>
-                <div className="text-xs text-gray-400">提案人：{item.author_name || "學生"}</div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-slate-200">{item.title}</h3>
+                <p className="text-sm text-gray-700 dark:text-slate-300 whitespace-pre-line">{item.content}</p>
+                <div className="text-xs text-gray-400 dark:text-slate-400">提案人：{item.author_name || "學生"}</div>
 
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-100 justify-end">
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-slate-700 justify-end">
                   <button
+                    type="button"
                     onClick={() => runEvent(() => handleApprove(item.id))}
                     className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg transition shadow-sm"
                   >
                     ✅ 核可發布
                   </button>
                   <button
+                    type="button"
                     onClick={() => runEvent(() => handleReject(item.id))}
-                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-medium rounded-lg transition"
+                    className="px-3 py-1.5 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 border border-red-200 dark:border-slate-700 text-xs font-medium rounded-lg transition"
                   >
                     ❌ 退回提案
                   </button>
@@ -404,31 +425,33 @@ export default function ProposalsPage() {
       )}
 
       {isLoggedIn ? (
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
           <form onSubmit={e => { e.preventDefault(); runEvent(() => handleSubmit(e)); }} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="proposal-title" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                   提案標題
                 </label>
                 <input
+                  id="proposal-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="例如：關於圖書館開館時間建議..."
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label htmlFor="proposal-category" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                   分類
                 </label>
                 <select
+                  id="proposal-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="環境與設備">環境與設備</option>
                   <option value="學聯與活動">學聯與活動</option>
@@ -439,15 +462,16 @@ export default function ProposalsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
+              <label htmlFor="proposal-content" className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">
                 寶貴意見內容
               </label>
               <textarea
+                id="proposal-content"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 rows={4}
                 placeholder="請詳細說明您的想法或建議..."
-                className="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                className="w-full p-3 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
                 required
               />
             </div>
@@ -464,25 +488,29 @@ export default function ProposalsPage() {
           </form>
         </div>
       ) : (
-        <div className="p-3.5 bg-gray-100/90 rounded-2xl text-center text-sm font-semibold text-gray-500 shadow-sm flex items-center justify-center gap-1.5 border border-gray-200/50">
+        <div className="p-3.5 bg-gray-100/90 dark:bg-slate-800/80 rounded-2xl text-center text-sm font-semibold text-gray-500 dark:text-slate-400 shadow-sm flex items-center justify-center gap-1.5 border border-gray-200/50 dark:border-slate-700">
           🔒 請登入後即可發起提案
         </div>
       )}
 
       <div className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-800 px-1">熱門學生提案</h2>
+        <h2 className="text-lg font-bold text-gray-800 dark:text-slate-200 px-1">熱門學生提案</h2>
 
-        {publicListStatus === "loading" ? (
-          <p role="status" className="text-gray-500 text-center py-10">公開提案載入中…</p>
-        ) : publicListStatus === "error" ? (
+        {publicListStatus === "error" && publicProposals.length > 0 && (
+          <button type="button" onClick={() => runEvent(fetchProposals)} className="px-4 py-2 bg-blue-700 text-white font-medium rounded-xl text-sm">重試公開提案</button>
+        )}
+        {publicListStatus === "loading" && publicProposals.length === 0 ? (
+          <p role="status" className="text-gray-500 dark:text-slate-400 text-center py-10">公開提案載入中…</p>
+        ) : publicListStatus === "error" && publicProposals.length === 0 ? (
           <button type="button" onClick={() => runEvent(fetchProposals)} className="px-4 py-2 bg-blue-700 text-white font-medium rounded-xl text-sm">重試公開提案</button>
         ) : publicProposals.length === 0 ? (
-          <p className="text-gray-500 text-center py-10 bg-white rounded-2xl border border-gray-200">
+          <p className="text-gray-500 dark:text-slate-400 text-center py-10 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800">
             目前尚無公開提案。
           </p>
         ) : (
           publicProposals.map((item) => {
             const comments = commentsMap[item.id] || [];
+            const commentStatus = commentsStatus[item.id] ?? "loading";
             const isVoted = votedIds.includes(item.id);
             const dbCount = item.upvotes_count || 0;
             const stateCount = upvotesMap[item.id];
@@ -492,14 +520,15 @@ export default function ProposalsPage() {
             return (
               <div
                 key={item.id}
-                className="p-5 bg-white rounded-2xl border border-gray-200 shadow-sm space-y-4 relative"
+                id={`item-${item.id}`}
+                className="scroll-mt-20 p-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-4 relative"
               >
-                <div className="flex items-center justify-between pb-1 border-b border-gray-100">
+                <div className="flex items-center justify-between pb-1 border-b border-gray-100 dark:border-slate-800">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full border border-blue-200">
+                    <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 text-xs font-semibold rounded-full border border-blue-200 dark:border-slate-700">
                       {item.status || "研議中"}
                     </span>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-400 dark:text-slate-400">
                       {item.created_at
                         ? new Date(item.created_at).toLocaleDateString()
                         : ""}
@@ -508,8 +537,9 @@ export default function ProposalsPage() {
 
                   {isAdmin && (
                     <button
+                      type="button"
                       onClick={() => runEvent(() => handleDeleteProposal(item.id))}
-                      className="text-xs px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg border border-red-200 transition flex items-center gap-1"
+                      className="text-xs px-2.5 py-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 font-medium rounded-lg border border-red-200 dark:border-slate-700 transition flex items-center gap-1"
                     >
                       🗑️ 刪除
                     </button>
@@ -517,19 +547,20 @@ export default function ProposalsPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">{item.title}</h3>
-                  <div className="text-xs text-gray-400 mt-1">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-slate-200">{item.title}</h3>
+                  <div className="text-xs text-gray-400 dark:text-slate-400 mt-1">
                     提案人：{item.author_name || "學生"} • 發布時間：
                     {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
                   </div>
                 </div>
 
-                <p className="text-gray-800 whitespace-pre-line text-sm leading-relaxed">
+                <p className="text-gray-800 dark:text-slate-300 whitespace-pre-line text-sm leading-relaxed">
                   {item.content}
                 </p>
 
                 <div className="pt-1">
                   <button
+                    type="button"
                     onClick={() => runEvent(() => handleUpvote(item.id))}
                     disabled={pendingVotes.includes(item.id)}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-full border transition flex items-center gap-1.5 shadow-sm ${
@@ -550,35 +581,47 @@ export default function ProposalsPage() {
                 </div>
 
                 {isAdmin && (
-                  <div className="p-4 bg-purple-50/60 border border-purple-200 rounded-xl space-y-3 mt-3">
-                    <div className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                  <div className="p-4 bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200 dark:border-slate-700 rounded-xl space-y-3 mt-3">
+                    <div className="text-xs font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1">
                       🔑 管理員控制台（修改狀態與官方回覆）：
                     </div>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
+                      <div className="space-y-1">
+                      <label htmlFor={`proposal-status-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-slate-300">
+                        提案狀態<span className="sr-only">：{item.title}</span>
+                      </label>
                       <select
+                        id={`proposal-status-${item.id}`}
                         value={statusInputs[item.id] || "研議中"}
                         onChange={(e) =>
-                          setStatusInputs({ ...statusInputs, [item.id]: e.target.value })
+                          setStatusInputs(current => ({ ...current, [item.id]: e.target.value }))
                         }
-                        className="p-2 border border-purple-300 rounded-xl bg-white text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full p-2 border border-purple-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-xs font-semibold text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
                       >
                         <option value="研議中">研議中</option>
                         <option value="通過">通過</option>
                         <option value="已採納">已採納</option>
                         <option value="不採納">不採納</option>
                       </select>
-
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                      <label htmlFor={`proposal-reply-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-slate-300">
+                        官方回覆<span className="sr-only">：{item.title}</span>
+                      </label>
                       <input
+                        id={`proposal-reply-${item.id}`}
                         type="text"
                         value={replyInputs[item.id] || ""}
                         onChange={(e) =>
-                          setReplyInputs({ ...replyInputs, [item.id]: e.target.value })
+                          setReplyInputs(current => ({ ...current, [item.id]: e.target.value }))
                         }
                         placeholder="輸入官方回覆內容..."
-                        className="flex-1 p-2 border border-purple-300 rounded-xl bg-white text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full p-2 border border-purple-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-xs text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
                       />
+                      </div>
 
                       <button
+                        type="button"
                         onClick={() => runEvent(() => handleSaveControl(item.id))}
                         disabled={pendingAction}
                         className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm"
@@ -590,30 +633,46 @@ export default function ProposalsPage() {
                 )}
 
                 {item.reply && (
-                  <div className="p-4 bg-purple-50/80 border-l-4 border-purple-600 rounded-r-xl space-y-1 mt-2">
-                    <div className="font-bold text-purple-900 flex items-center gap-1 text-xs">
+                  <div className="p-4 bg-purple-50/80 dark:bg-purple-950/40 rounded-xl space-y-1 mt-2">
+                    <div className="font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1 text-xs">
                       📢 學權組官方回覆：
                     </div>
-                    <p className="text-purple-950 text-sm whitespace-pre-line">
+                    <p className="text-purple-950 dark:text-slate-200 text-sm whitespace-pre-line">
                       {item.reply}
                     </p>
                   </div>
                 )}
 
-                <hr className="border-gray-100 my-2" />
+                <hr className="border-gray-100 dark:border-slate-800 my-2" />
 
                 <div className="space-y-3 pt-1">
-                  <div className="text-xs font-bold text-gray-700 flex items-center gap-1">
-                    💬 討論與留言 ({comments.length})
+                  <div className="text-xs font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1">
+                    💬 討論與留言 {commentStatus === "ready" ? `(${comments.length})` : ""}
                   </div>
 
+                  {commentStatus === "loading" && (
+                    <p role="status" className="text-xs text-gray-500 dark:text-slate-400">留言載入中…</p>
+                  )}
+                  {commentStatus === "error" && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <p role="alert" className="text-red-700 dark:text-red-400">留言載入失敗，請重試。</p>
+                      <button type="button" onClick={() => runEvent(() => fetchComments([item.id]))}
+                        aria-label={`重試留言：${item.title}`}
+                        className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-blue-700 dark:text-blue-300 font-semibold">
+                        重試留言
+                      </button>
+                    </div>
+                  )}
+                  {commentStatus === "ready" && comments.length === 0 && (
+                    <p className="text-xs text-gray-500 dark:text-slate-400">尚無留言，歡迎分享您的看法。</p>
+                  )}
                   {comments.map((c) => (
                     <div
                       key={c.id}
-                      className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-xs space-y-1 relative"
+                      className="p-3 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 text-xs space-y-1 relative"
                     >
-                      <div className="flex items-center justify-between text-gray-500">
-                        <span className="font-semibold text-gray-800 flex items-center gap-1">
+                      <div className="flex flex-wrap gap-2 items-center justify-between text-gray-500 dark:text-slate-400">
+                        <span className="font-semibold text-gray-800 dark:text-slate-200 flex items-center gap-1">
                           👤 {c.author_name || "學生"}
                         </span>
                         <div className="flex items-center gap-2">
@@ -624,42 +683,49 @@ export default function ProposalsPage() {
                           </span>
                           {isAdmin && (
                             <button
+                              type="button"
                               onClick={() => runEvent(() => handleDeleteComment(c.id, item.id))}
-                              className="text-red-500 hover:text-red-700 font-bold"
+                              aria-label={`刪除留言：${c.content.slice(0, 30)}`}
+                              className="inline-flex size-8 items-center justify-center rounded-lg text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 font-bold"
                             >
                               ✕
                             </button>
                           )}
                         </div>
                       </div>
-                      <p className="text-gray-800 text-xs">{c.content}</p>
+                      <p className="text-gray-800 dark:text-slate-300 text-xs">{c.content}</p>
                     </div>
                   ))}
 
                   {isLoggedIn && (
                     <div className="space-y-2 pt-2">
+                      <label htmlFor={`proposal-comment-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-slate-300">
+                        新增留言<span className="sr-only">：{item.title}</span>
+                      </label>
                       <textarea
+                        id={`proposal-comment-${item.id}`}
                         value={commentInputs[item.id] || ""}
                         onChange={(e) =>
-                          setCommentInputs({ ...commentInputs, [item.id]: e.target.value })
+                          setCommentInputs(current => ({ ...current, [item.id]: e.target.value }))
                         }
                         rows={2}
                         placeholder="寫下您的看法與建議..."
-                        className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full p-2.5 border border-gray-300 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-800 text-xs text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                       <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={commentAnon[item.id] || false}
                             onChange={(e) =>
-                              setCommentAnon({ ...commentAnon, [item.id]: e.target.checked })
+                              setCommentAnon(current => ({ ...current, [item.id]: e.target.checked }))
                             }
                             className="w-3.5 h-3.5 text-blue-600 rounded"
                           />
                           <span>🕵️ 匿名留言 (隱藏姓名)</span>
                         </label>
                         <button
+                          type="button"
                           onClick={() => runEvent(() => handleAddComment(item.id))}
                           className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl transition shadow-sm"
                         >

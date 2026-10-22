@@ -51,11 +51,22 @@ test('admin reply save and confirmed clear complete through real routes', async 
   await page.goto('/feedback');
   const editor = page.getByRole('textbox', { name: '回覆「Fixture feedback」', exact: true });
   await expect(editor).toBeVisible();
+  await expect(page.getByRole('tab', { name: /^待回覆/ })).toHaveAttribute('aria-selected', 'true');
   // When a reply is saved and subsequently cleared through confirmation.
   await editor.fill('Browser official reply');
-  await page.getByRole('button', { name: '發布官方回覆' }).click();
-  await expect(page.locator('main').getByRole('status')).toContainText('成功');
+  await page.getByRole('button', { name: '發布官方回覆' }).press('Enter');
+  const result = page.getByRole('status', { name: '清單操作結果' });
+  await expect(result).toContainText(/Fixture feedback.*成功/);
+  await expect(result).toBeFocused();
+  await expect(page.getByRole('tab', { name: /^待回覆/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByText('目前沒有待回覆建言', { exact: true })).toBeVisible();
   expect((await state(request)).rows('feedback')[0]?.reply).toBe('Browser official reply');
+  await expect(page.getByRole('tab', { name: /^待回覆/ })).toHaveText('待回覆0');
+  await expect(page.getByRole('tab', { name: /^已回覆/ })).toHaveText('已回覆1');
+  await capture(page, 'admin-awaiting-saved-1440');
+  await page.getByRole('tab', { name: /^已回覆/ }).click();
+  await expect(editor).toHaveValue('Browser official reply');
   await capture(page, 'admin-saved-1440');
   await editor.fill('');
   const confirmation = page.waitForEvent('dialog');
@@ -64,6 +75,9 @@ test('admin reply save and confirmed clear complete through real routes', async 
   await expect.poll(async () => (await state(request)).total).toBe(2);
   // Then the provider contains an empty reply, not a silently ignored write.
   expect((await state(request)).rows('feedback')[0]?.reply).toBe('');
+  await expect(page.getByText('尚無官方回覆', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: /^待回覆/ }).click();
+  await expect(editor).toHaveValue('');
   await capture(page, 'admin-cleared-1440');
 });
 test('removed backend page and feedback API return 404 even for an admin', async ({ context, request }) => {
@@ -225,9 +239,9 @@ test('confirmed vote and cancellation keep zero literal and ignore forged local 
 test('failed provider loads and writes remain explicit with drafts retained', async ({ page, context, request }) => {
   // Given an admin with deterministic upstream read failure.
   await login(context, 'admin');
-   await control(request, { path: '/rest/v1/rpc/rights_list_public_feedback', method: 'POST' });
+   await control(request, { path: '/rest/v1/rpc/rights_queue_page', method: 'POST' });
   // When loading public and protected feedback then attempting a failed save.
-  expect((await context.request.get(`${appURL}/api/rights/feedback`)).status()).toBe(503);
+  expect((await context.request.get(`${appURL}/api/rights/queue?kind=feedback&filter=awaiting`)).status()).toBe(503);
   await page.goto('/feedback');
   await expect(page.getByText('無法載入建言，請稍後再試。')).toBeVisible();
    await capture(page, 'load-failure');

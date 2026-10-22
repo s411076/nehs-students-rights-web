@@ -17,7 +17,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.unstubAllEnvs(); await fixture.close(); });
 const adminCases = [
-  { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '通過', reply: 'reply', expectedVersion: 1 } },
+  { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '處理中', reply: 'reply', expectedVersion: 1 } },
   { action: 'approveProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
   { action: 'rejectProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
   { action: 'deleteProposal', payload: { id: 'proposal-1', expectedVersion: 1 } },
@@ -42,7 +42,7 @@ async function actionRequest(body: unknown, identity: 'student' | 'admin' = 'stu
   });
 }
 const rpcCases = [
-  ['update_proposal_control', { p_id: 'proposal-1', p_status: '通過', p_reply: 'reply', p_expected_version: 1 }],
+  ['update_proposal_control', { p_id: 'proposal-1', p_status: '處理中', p_reply: 'reply', p_expected_version: 1 }],
   ['approve_proposal', { p_id: 'proposal-2', p_expected_version: 1 }],
   ['reject_proposal', { p_id: 'proposal-2', p_expected_version: 1 }],
   ['delete_proposal', { p_id: 'proposal-1', p_expected_version: 1 }],
@@ -135,7 +135,7 @@ test.each([[], { inserted: true }, { id: 'x', version: 1, secret: 'PRIVATE' }])(
 });
 test.each([
   { body: { action: 'setVoteCount', payload: { proposalId: 'proposal-1', count: 2 } }, headers: {}, status: 400 },
-  { body: { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true, status: '通過' } }, headers: {}, status: 400 },
+  { body: { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true, status: '處理中' } }, headers: {}, status: 400 },
   { body: studentCases[0], headers: { origin: '' }, status: 403 },
   { body: studentCases[0], headers: { origin: 'null' }, status: 403 },
   { body: studentCases[0], headers: { origin: 'not a URL' }, status: 403 },

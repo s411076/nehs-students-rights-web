@@ -68,13 +68,17 @@ npm run test:e2e
 
 ## How It Works
 
+**Moderation stays inline, with no separate backend page.** Administrators reply to, delete, and look up feedback authors on `/feedback`; proposal approval/rejection, status/reply editing, comment deletion, and author lookup stay on `/proposals`. Home-section creation/deletion stays on `/`. `/admin` and its feedback-list API have been removed and return 404.
+
 **Server-first identity verification.** Every request re-verifies with `getUser()` against the Auth server, accepting only confirmed full-domain `nehs.hc.edu.tw` addresses (`lib/auth/server.ts`); admin identity calls the caller-only `rights_is_admin` RPC, without enumerating the membership table. The database checks current school eligibility and protected, uniquely constrained administrator membership. `proxy.ts` only forwards refreshes, with no authorization caching.
 
 **All writes go through a 13-action POST allowlist.** `POST /api/rights/actions` (`lib/rights/server-actions.ts`) accepts only 4 student actions (`createProposal`, `createFeedback`, `addComment`, `setVote`) and 9 admin actions (proposal review, comment deletion, reply saving, announcement management, and more); the request body is parsed strictly with `parseActionRequest`, with the request Origin, JSON media type, and the 65536-byte limit all enforced inside the guards. `setVote` is desired-state and idempotent: historical votes stay an immutable baseline and new ballots start per user, so totals never rewrite history and old ledgers are never double-counted. Each mutation derives a UUID and records display attribution privately in the database.
 
 **Public reads get bounded RPC pages only; anonymous reads get no names.** Every list reads through a bounded `Page<T>` RPC (`lib/rights/server-reads.ts`, default `p_limit=20`, max 50) instead of raw table selects, with `PUBLIC_STATUSES` filtering for public proposals; public feedback omits `author_name` for anonymous rows before serialization, and admin lists stay redacted too. Identifying an anonymous author requires the separate guarded `rights_admin_author` lookup behind the server admin gate, returning `known` only for reliably attributed new rows while unknown historical ownership stays unknown. The profile page never queries proposals (`app/profile/page.tsx`), and the profile proposal list remains intentionally unavailable.
 
-**Local hardening is not deployed.** The database hardening above is implemented locally and uncommitted, not yet in production. Local verification and production release are separate gates; see `docs/database-hardening.md` for evidence and release prerequisites, and `docs/database-hardening-contract.md` for the contract. `docs/security-source-remediation.md` describes only the earlier source-only work.
+**This branch requires a coordinated database and application release.** The earlier hardening release is recorded in `docs/database-hardening.md §7`; this task does not deploy the newer status-collapse or filtered-queue migrations. Fresh local test databases execute the ordered chain in `scripts/database/migrations.mjs`; existing deployments must apply only missing versions after checking migration history. Save editor drafts, drain writes during maintenance, apply the missing migrations and matching application, then smoke-test before reopening writes. See `docs/database-hardening.md §5a` for rollback limitations and `docs/database-hardening-contract.md` for the contract.
+
+**Queue counts cover all matching records, not just loaded pages.** `/api/rights/queue` filters before pagination and returns exact tab counts plus the selected total. Awaiting feedback and pending proposals are oldest-first; other queues are newest-first. Each batch loads 20 rows (API maximum 50), with no cap on how many batches can be opened. Failed counts remain unknown rather than appearing as zero.
 
 **Votes use server state, with no automatic retries.** Per-proposal single-flight in `app/proposals/ProposalVote.tsx` complements database serialization and unique ballots. Receipts and public-state reads determine the displayed count and caller's vote; localStorage is not authoritative. Uncertain outcomes show「無法確認是否已儲存，請先更新清單確認，勿重複提交。」and trigger read reconciliation, never mutation replay. OAuth retains the browser SDK's PKCE exchange followed by `getUser` verification; baseline headers remain in `next.config.ts`.
 
@@ -86,7 +90,6 @@ app/
   proposals/page.tsx     Proposal list, comments, petition votes
   feedback/page.tsx      Anonymous feedback
   profile/page.tsx       Profile page (verified identity only, no proposal queries)
-  admin/page.tsx         Admin panel behind the server gate
   auth/callback/page.tsx OAuth callback completion page
   api/rights/
     actions/route.ts     13-action POST allowlist
@@ -96,7 +99,7 @@ app/
 components/
   AuthProvider.tsx       Generation-guarded identity provider
   Navbar.tsx             Synced identity, fail-closed logout
-  admin/                 Admin panel client components
+  admin/                 Guarded inline author lookup
 lib/
   auth/                  Server verification, types, OAuth completion
   rights/                Contracts, validation, projections, server actions, RPC reads, client

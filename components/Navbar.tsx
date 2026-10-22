@@ -1,12 +1,15 @@
 ﻿'use client'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { House, Lightbulb, MessageSquareText, User, Wrench, X } from 'lucide-react'
+import { House, Lightbulb, LogOut, Menu, MessageSquareText, Moon, Sun, User, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { useAuth, useLogoutNotice } from '@/components/AuthProvider'
+import { useTheme } from '@/components/useTheme'
+import { ui } from '@/components/rights/ui'
 
 export default function Navbar() {
   const auth = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const [isOpen, setIsOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const { logoutError, logoutPending, beginLogout, reportLogoutFailure } = useLogoutNotice()
@@ -79,7 +82,7 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="bg-white dark:bg-slate-900 text-gray-900 dark:text-white border-b dark:border-slate-800 sticky top-0 z-40">
+      <nav className={`${ui.surface} text-gray-900 dark:text-white border-b ${ui.border} sticky top-0 z-40`}>
         <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -89,12 +92,10 @@ export default function Navbar() {
               aria-label="開啟側邊選單"
               aria-expanded={isOpen}
               aria-controls="navbar-drawer"
-              className="shrink-0 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color] text-gray-700 dark:text-slate-200"
+              className={ui.iconButton}
               title="開啟側邊選單"
             >
-              <svg aria-hidden="true" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" />
-              </svg>
+              <Menu aria-hidden="true" className="size-5" />
             </button>
 
             <Link className="min-w-0 truncate font-extrabold text-lg tracking-tight text-inherit" href="/">
@@ -103,8 +104,20 @@ export default function Navbar() {
           </div>
 
           <div className="flex min-w-0 max-w-1/2 items-center justify-end gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              disabled={theme === null}
+              aria-label="深色模式"
+              aria-pressed={theme === 'dark'}
+              title={theme === 'dark' ? '切換為淺色模式' : '切換為深色模式'}
+              className={ui.iconButton}
+            >
+              <Sun aria-hidden="true" className="hidden size-5 dark:block" />
+              <Moon aria-hidden="true" className="size-5 dark:hidden" />
+            </button>
              {(loggingOut || logoutPending) && !logoutError && (
-              <p data-testid="operation-status" role="status" aria-live="polite" className="min-w-0 truncate text-xs font-bold text-gray-500 dark:text-slate-400">
+              <p data-testid="operation-status" role="status" aria-live="polite" className="min-w-0 truncate text-xs font-bold text-gray-500 dark:text-neutral-400">
                 登出中…
               </p>
             )}
@@ -116,7 +129,7 @@ export default function Navbar() {
                 <button
                   type="button"
                   onClick={() => window.location.reload()}
-                  className="shrink-0 min-h-11 px-3 rounded-xl text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
+                  className={ui.secondaryButton}
                 >
                   重試
                 </button>
@@ -126,9 +139,9 @@ export default function Navbar() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="shrink-0 whitespace-nowrap bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition"
+                className={`${ui.secondaryButton} whitespace-nowrap`}
               >
-                🚪 登出
+                <LogOut aria-hidden="true" className="size-4 shrink-0" /> 登出
               </button>
             )}
           </div>
@@ -152,12 +165,12 @@ export default function Navbar() {
         aria-modal={isOpen ? true : undefined}
         aria-label="導覽選單"
         inert={!isOpen}
-        className={`fixed top-0 left-0 bottom-0 w-72 max-w-full max-h-dvh overflow-y-auto overscroll-contain bg-white dark:bg-slate-900 z-50 shadow-2xl transform transition-transform duration-300 ease-in-out motion-reduce:transition-opacity motion-reduce:translate-x-0 border-r dark:border-slate-800 flex flex-col justify-between ${
+        className={`fixed top-0 left-0 bottom-0 w-72 max-w-full max-h-dvh overflow-y-auto overscroll-contain ${ui.surface} z-50 shadow-2xl transform transition-transform duration-300 ease-in-out motion-reduce:transition-opacity motion-reduce:translate-x-0 border-r ${ui.border} flex flex-col justify-between ${
           isOpen ? 'translate-x-0' : '-translate-x-full motion-reduce:opacity-0'
         }`}
       >
         <div className="shrink-0">
-          <div className="p-5 border-b dark:border-slate-800 flex justify-between items-center">
+          <div className={`p-5 border-b ${ui.border} flex justify-between items-center`}>
             <span className="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
               導覽選單
             </span>
@@ -166,29 +179,29 @@ export default function Navbar() {
               ref={closeButtonRef}
               onClick={() => setIsOpen(false)}
               aria-label="關閉側邊選單"
-              className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-[background-color]"
+              className={ui.iconButton}
             >
-              <X aria-hidden="true" size={18} className="shrink-0" />
+              <X aria-hidden="true" className="size-5" />
             </button>
           </div>
 
           <div className="p-4 space-y-2">
             <Link href="/" onClick={() => setIsOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
+              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-neutral-200 hover:bg-blue-50 dark:hover:bg-neutral-800 rounded-xl transition-[background-color] group"
             >
               <House aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">首頁</span>
             </Link>
 
             <Link href="/feedback" onClick={() => setIsOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
+              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-neutral-200 hover:bg-blue-50 dark:hover:bg-neutral-800 rounded-xl transition-[background-color] group"
             >
               <MessageSquareText aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">回饋與建言</span>
             </Link>
 
             <Link href="/proposals" onClick={() => setIsOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
+              className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-neutral-200 hover:bg-blue-50 dark:hover:bg-neutral-800 rounded-xl transition-[background-color] group"
             >
               <Lightbulb aria-hidden="true" size={18} className="shrink-0" />
               <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">學生提案</span>
@@ -196,28 +209,20 @@ export default function Navbar() {
 
             {isPrivileged && (
               <Link href="/profile" onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
+                className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-neutral-200 hover:bg-blue-50 dark:hover:bg-neutral-800 rounded-xl transition-[background-color] group"
               >
                 <User aria-hidden="true" size={18} className="shrink-0" />
                 <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">個人資料</span>
               </Link>
             )}
 
-            {isPrivileged && auth.isAdmin && (
-              <Link href="/admin" onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-xl transition-[background-color] group"
-              >
-                <Wrench aria-hidden="true" size={18} className="shrink-0" />
-                <span className="group-hover:text-blue-600 dark:group-hover:text-blue-400">管理後台</span>
-              </Link>
-            )}
           </div>
         </div>
 
         {isPrivileged && userName && (
-          <div className="shrink-0 p-4 border-t dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50">
-            <p className="text-xs text-gray-500 dark:text-slate-400 font-bold">目前登入為：</p>
-            <p className="text-sm font-extrabold text-gray-800 dark:text-slate-200 truncate mt-0.5">{userName}</p>
+          <div className={`shrink-0 p-4 border-t ${ui.border} bg-neutral-50 dark:bg-neutral-800/50`}>
+            <p className="text-xs text-gray-500 dark:text-neutral-400 font-bold">目前登入為：</p>
+            <p className="text-sm font-extrabold text-gray-800 dark:text-neutral-200 truncate mt-0.5">{userName}</p>
           </div>
         )}
       </aside>

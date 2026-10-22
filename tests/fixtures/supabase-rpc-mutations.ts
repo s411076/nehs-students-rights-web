@@ -88,9 +88,9 @@ export function mutateRpc(data: FixtureData, name: string, context: { readonly b
   switch (name) {
     case 'rights_approve_proposal': case 'rights_reject_proposal':
       if (row.status !== '待審核') throw new FixtureRpcError(409, 'Review already completed');
-      row.status = name === 'rights_approve_proposal' ? '研議中' : '被退回'; break;
+      row.status = name === 'rights_approve_proposal' ? '處理中' : '被退回'; break;
     case 'rights_update_proposal_control': {
-      if (!['研議中', '通過', '已採納', '不採納'].includes(String(body.p_status))) throw new FixtureRpcError(400, 'Invalid status');
+      if (!['處理中', '已結案'].includes(String(body.p_status))) throw new FixtureRpcError(400, 'Invalid status');
       const reply = text(body.p_reply);
       row.status = body.p_status; row.reply = reply; break;
     }

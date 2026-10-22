@@ -70,6 +70,29 @@ node tests/real/boundary.http.mjs "$STATE"
 
 還原限制要先記住：raw-table 撤權後不能只回滾 app，因為舊網站的 raw-table 路徑已被撤權。任何情況都不做 DISABLE RLS，也不做 broad grant。
 
+## 5a. 狀態收斂（status collapse）協調發布（只描述，不執行、不部署正式）
+
+本次只做本機 `supabase/migrations/20261017000000_proposal_status_collapse.sql`，
+絕不在此任務部署正式。正式套用是未來獨立協調切換，必須與相容網站同版進行；
+migration 與網站是同一部署單位，不可各自獨立上線。
+
+- 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse），
+  `regression.mjs`、`managed-principal.mjs` 與 `stack.mjs apply` 都跑整鏈並逐檔 SHA-256 驗證，
+  不允許單檔子集套用。`stack.mjs apply` 用法為 `apply STATE SHA1 SHA2...`（每檔一個已完成雜湊）。
+  這是全新測試資料庫的規則；正式環境依 migration history 只套尚未執行的版本，不重跑第 7 節已完成的 hardening。
+- Managed principal：沿用 hardening 的最小暫時 `GRANT rights_executor TO current_user WITH SET, INHERIT`
+  並於提交前 `REVOKE ... GRANTED BY current_user` 清理；`rights_private` 函式以 `SET ROLE rights_executor`
+  取代以保留 owner，`public.rights_get_public_item` 以 postgres（DB owner 具 public CREATE＋暫時成員資格）取代，
+  結尾 `ALTER ... OWNER TO rights_executor` 冪等確認＋owner 斷言；無永久 broad grant、無 BYPASSRLS 變更、無 owner 漂移。
+- 狀態映射（鎖定，僅此四組）：研議中→處理中、通過→處理中、已採納→已結案、不採納→已結案。
+  待審核／被退回／未知歷史值原樣保留，無全域 status CHECK 改寫。
+  Backfill 的 `content_version` 觸發器遞增是合法併發守衛遞增，preservation 依設計忽略該欄但斷言其安全整數範圍。
+- 編輯器／寫入 drain（切換當天）：事先通知管理員複製或儲存未送出內容，再開短寫入維護並等待進行中寫入完成；已開啟舊版編輯草稿者必須保留文字、重新載入伺服器版本並人工比對後再儲存，
+  因為 approve 落點與 control 白名單已從四狀態收斂為處理中／已結案，舊版記憶體內草稿的 `expected_version`／status 值會打到 PT400/PT409。
+  確認 smoke 通過後才重開寫入。
+- 回滾：維持維護狀態，從切換前已驗證的備份復原並配對舊網站，或採經驗證的前向修復，不單獨回滾 app。狀態合併不可逆，不能靠將已結案改回某個舊值恢復原決議；任何情況都不做 DISABLE RLS、broad grant 或手動改 status 回舊值。
+  若 collapse 交易失敗即完整 rollback（`ON_ERROR_STOP=1`），事後驗證無殘留物件、筆數不變、history 未登記該版本。
+
 ## 6. 剩餘缺口（準確列出）
 
 - Auth 邊界與 owner 修正已通過本機 principal gate；正式套用前仍需比對即時環境。

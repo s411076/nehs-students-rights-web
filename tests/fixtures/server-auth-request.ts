@@ -19,7 +19,7 @@ export async function sessionRequest(url: string, identity: FixtureIdentity = 's
     createChunks(name, `base64-${Buffer.from(JSON.stringify(replacement)).toString('base64url')}`)
       .forEach(cookie => jar.set(cookie.name, cookie.value));
   }
-  return new NextRequest('http://localhost/admin', {
+  return new NextRequest('http://localhost/feedback', {
     headers: { cookie: Array.from(jar, ([name, value]) => `${name}=${value}`).join('; ') },
   });
 }

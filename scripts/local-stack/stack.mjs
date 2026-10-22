@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { credentials, users } from './identities.mjs';
+import { verifyMigrationChain } from '../database/migrations.mjs';
 
 const source = 'database-recovery-parity-20261016';
 const pgImage = 'supabase/postgres:17.6.1.136';
@@ -14,7 +15,7 @@ const docker = (args, input) => execFileSync('docker', args, {
 const sql = (container, query) => docker(['exec', '-i', container, 'psql', '-h', '/tmp',
   '-U', 'supabase_admin', '-d', 'fixture', '-X', '-v', 'ON_ERROR_STOP=1'], query);
 const sha = value => createHash('sha256').update(value).digest('hex');
-const [command, statePath, migrationPath, expectedHash] = process.argv.slice(2);
+const [command, statePath, ...expectedHashes] = process.argv.slice(2);
 
 if (command === 'up') {
   const dir = mkdtempSync(join(tmpdir(), 'rights-real-'));
@@ -62,7 +63,7 @@ if (command === 'up') {
   sql(state.db, `INSERT INTO public.admins(email) VALUES ('${users.admin.email}');
     INSERT INTO public.proposals(id,user_id,title,content,status,author_name,author_email,upvotes_count)
     VALUES ('20000000-0000-4000-8000-000000000001','${users.studentA.id}',
-    'Synthetic baseline proposal','Synthetic body','通過','Synthetic studentA','${users.studentA.email}',7);`);
+    'Synthetic baseline proposal','Synthetic body','處理中','Synthetic studentA','${users.studentA.email}',7);`);
   state.tokens = credentials(secret);
   sql(state.db, `CREATE FUNCTION public.synthetic_request_identity() RETURNS jsonb
     LANGUAGE sql STABLE SECURITY INVOKER SET search_path='' AS
@@ -99,18 +100,15 @@ if (command === 'up') {
       break;
     case 'apply': {
       if (state.mode !== 'baseline' || !state.baselinePassed) throw new Error('Run baseline HTTP tests first');
-      if (!resolve(migrationPath).startsWith(`${resolve('supabase/migrations')}/`)) throw new Error('Migration path required');
-      const migration = readFileSync(migrationPath, 'utf8');
-      if (!/^[a-f0-9]{64}$/.test(expectedHash ?? '') || sha(migration) !== expectedHash) {
-        throw new Error('Explicit completed-file SHA-256 required; never apply a file being written');
-      }
-      sql(state.db, migration);
+      const chain = verifyMigrationChain(resolve('.'), path => readFileSync(path, 'utf8'), expectedHashes);
+      for (const entry of chain) sql(state.db, entry.sql);
       sql(state.db, "NOTIFY pgrst, 'reload schema';");
-      state.mode = 'hardened'; state.migrationSha256 = expectedHash;
+      state.mode = 'hardened';
+      state.migrations = chain.map(({ file, sha256 }) => ({ file, sha256 }));
       writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
-      console.log('Applied to synthetic fixture only. Run hardened HTTP tests.');
+      console.log(`Applied ${chain.length} migrations to synthetic fixture only. Run hardened HTTP tests.`);
       break;
     }
-    default: throw new Error('Usage: node scripts/local-stack/stack.mjs up | down STATE | apply STATE MIGRATION SHA256');
+    default: throw new Error('Usage: node scripts/local-stack/stack.mjs up | down STATE | apply STATE SHA256...');
   }
 }

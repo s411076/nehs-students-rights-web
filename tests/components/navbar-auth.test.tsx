@@ -4,6 +4,7 @@ import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { AuthProvider, useAuth } from '../../components/AuthProvider';
 import Navbar from '../../components/Navbar';
 import { fixtureSession } from '../fixtures/supabase-server';
+import { mockSystemTheme } from '../fixtures/theme';
 
 const sdk = vi.hoisted(() => ({
   listener: undefined as ((event: AuthChangeEvent, session: Session | null) => void) | undefined,
@@ -36,6 +37,7 @@ function deferredResponse() {
 }
 
 beforeEach(() => {
+  mockSystemTheme();
   sdk.unsubscribe.mockClear();
   sdk.signOut.mockReset().mockResolvedValue({ error: null });
   sdk.listener = undefined;
@@ -52,12 +54,12 @@ test('hides profile link, identity and logout when shared state is anonymous', a
   await waitFor(() => expect(sdk.listener).toBeDefined());
   await waitFor(() => expect(screen.queryByTestId('operation-status')).toBeNull());
   expect(screen.queryByText('個人資料')).toBeNull();
-  expect(screen.queryByText('🚪 登出')).toBeNull();
+  expect(screen.queryByRole('button', { name: '登出' })).toBeNull();
   expect(screen.queryByText('目前登入為：')).toBeNull();
   expect(screen.queryByText('管理後台')).toBeNull();
 });
 
-test('matches shared verified admin state: profile, identity, logout and admin view', async () => {
+test('shows shared verified admin identity without a separate backend link', async () => {
   // Given
   vi.stubGlobal('fetch', async () => Response.json(admin));
   // When
@@ -65,8 +67,9 @@ test('matches shared verified admin state: profile, identity, logout and admin v
   // Then
   await waitFor(() => expect(screen.getByText('Fixture admin')).toBeInTheDocument());
   expect(screen.getByText('個人資料')).toBeInTheDocument();
-  expect(screen.getByText('🚪 登出')).toBeInTheDocument();
-  expect(screen.getByText('管理後台')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '開啟側邊選單' }));
+  expect(screen.getAllByRole('link').some(link => link.getAttribute('href') === '/admin')).toBe(false);
 });
 
 test('verified student sees profile but no admin view', async () => {
@@ -101,9 +104,9 @@ test('logout immediately hides privileged nav, signs out once and navigates', as
   let release!: (value: { error: null }) => void;
   sdk.signOut.mockImplementationOnce(() => new Promise<{ error: null }>(done => { release = done; }));
   view();
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
   // When
-  fireEvent.click(screen.getByText('🚪 登出'));
+  fireEvent.click(screen.getByRole('button', { name: '登出' }));
   // Then: nonprivileged UI immediately, before signOut settles, with no extra timers
   expect(screen.queryByText('個人資料')).toBeNull();
   expect(screen.queryByText('管理後台')).toBeNull();
@@ -120,9 +123,9 @@ test('signOut rejection shows explicit failure and stays nonprivileged', async (
   vi.stubGlobal('fetch', async () => Response.json(admin));
   sdk.signOut.mockRejectedValueOnce(new TypeError('network down'));
   view();
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
   // When
-  await act(async () => { fireEvent.click(screen.getByText('🚪 登出')); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '登出' })); });
   // Then
   expect(screen.getByTestId('operation-status')).toHaveTextContent(/登出失敗/);
   expect(screen.queryByText('個人資料')).toBeNull();
@@ -136,9 +139,9 @@ test('signOut error result shows explicit failure and never declares success', a
   vi.stubGlobal('fetch', async () => Response.json(student));
   sdk.signOut.mockResolvedValueOnce({ error: { message: 'session missing', name: 'AuthError', status: 403 } });
   view();
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
   // When
-  await act(async () => { fireEvent.click(screen.getByText('🚪 登出')); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '登出' })); });
   // Then
   expect(screen.getByTestId('operation-status')).toHaveTextContent(/登出失敗/);
   expect(screen.queryByText('個人資料')).toBeNull();
@@ -152,10 +155,10 @@ test.each(['before failure', 'after failure'])('logout failure survives anonymou
   let release: ((value: { error: { status: number } }) => void) | undefined;
   sdk.signOut.mockImplementationOnce(() => new Promise(done => { release = done; }));
   view();
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
   const originalNav = screen.getByRole('navigation');
   // When: signOut fails and SIGNED_OUT remounts the provider's children in either order.
-  fireEvent.click(screen.getByText('🚪 登出'));
+  fireEvent.click(screen.getByRole('button', { name: '登出' }));
   if (timing === 'before failure') act(() => { sdk.listener?.('SIGNED_OUT', null); });
   await act(async () => { release?.({ error: { status: 400 } }); });
   if (timing === 'after failure') act(() => { sdk.listener?.('SIGNED_OUT', null); });
@@ -165,7 +168,7 @@ test.each(['before failure', 'after failure'])('logout failure survives anonymou
   expect(screen.getByTestId('operation-status')).toHaveAttribute('role', 'alert');
   expect(screen.queryByText('個人資料')).toBeNull();
   expect(screen.queryByText('管理後台')).toBeNull();
-  expect(screen.queryByText('🚪 登出')).toBeNull();
+  expect(screen.queryByRole('button', { name: '登出' })).toBeNull();
   expect(sdk.signOut).toHaveBeenCalledTimes(1);
   expect(window.location.href).toBe('http://localhost/');
 });
@@ -176,8 +179,8 @@ test('failed logout recovers to fresh verification instead of stale role', async
   vi.stubGlobal('fetch', fetcher);
   sdk.signOut.mockRejectedValueOnce(new TypeError('network down'));
   view();
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
-  await act(async () => { fireEvent.click(screen.getByText('🚪 登出')); });
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '登出' })); });
   expect(screen.getByTestId('operation-status')).toHaveTextContent(/登出失敗/);
   fetcher.mockResolvedValue(Response.json(student));
   // When: a fresh sign-in verification arrives for a new generation
@@ -202,7 +205,7 @@ test('delayed admin response after logout never restores privileged nav', async 
   expect(screen.queryByText('個人資料')).toBeNull();
   expect(screen.queryByText('管理後台')).toBeNull();
   expect(screen.queryByText('目前登入為：')).toBeNull();
-  expect(screen.queryByText('🚪 登出')).toBeNull();
+  expect(screen.queryByRole('button', { name: '登出' })).toBeNull();
 });
 
 test('unmount during pending logout leaves no stale identity behind', async () => {
@@ -211,8 +214,8 @@ test('unmount during pending logout leaves no stale identity behind', async () =
   let release!: (value: { error: null }) => void;
   sdk.signOut.mockImplementationOnce(() => new Promise<{ error: null }>(done => { release = done; }));
   const rendered = render(<AuthProvider><Navbar /></AuthProvider>);
-  await waitFor(() => expect(screen.getByText('🚪 登出')).toBeInTheDocument());
-  fireEvent.click(screen.getByText('🚪 登出'));
+  await waitFor(() => expect(screen.getByRole('button', { name: '登出' })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '登出' }));
   // When
   rendered.unmount();
   await act(async () => { release({ error: null }); });
@@ -240,7 +243,7 @@ test('logout start clears privileged siblings before a no-event failure and reje
   render(<AuthProvider><Navbar /><Sibling /></AuthProvider>);
   await screen.findByText('Privileged sibling content');
   // When: no SIGNED_OUT event is emitted by the SDK.
-  fireEvent.click(screen.getByText('🚪 登出'));
+  fireEvent.click(screen.getByRole('button', { name: '登出' }));
   // Then: all shared privileges vanish before logout settles.
   expect(screen.queryByText('Privileged sibling content')).toBeNull();
   expect(screen.queryByText('管理後台')).toBeNull();

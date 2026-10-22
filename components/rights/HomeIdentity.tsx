@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { PartyPopper, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import confetti from 'canvas-confetti';
 import { useAuth, useOAuthReturn } from '@/components/AuthProvider';
 import { clearLoginCelebrationFlag, consumeLoginCelebrationFlag, markLoginCelebrationFlag, startGoogleOAuth } from '@/lib/auth/oauth-completion';
+import { ui } from './ui';
 
 export function HomeIdentity() {
   const [supabase] = useState(createClient);
@@ -61,22 +63,22 @@ export function HomeIdentity() {
         ? '登入資格不符：請使用已驗證的竹科實中學校帳號。'
         : '登入失敗：Google 回傳錯誤或登入未完成，請再試一次。'}
     </p>}
-    {authStatus === 'unavailable' ? <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-8 rounded-2xl shadow-lg mb-10 text-center">
+    {authStatus === 'unavailable' ? <div className={`${ui.card} p-6 mb-8 text-center`}>
       <p role="alert" className="text-sm font-bold text-red-600 dark:text-red-400 mb-4">登入服務暫時無法使用，無法確認目前的登入狀態。請稍後重試。</p>
       <button type="button" onClick={() => setAuthRetryNonce(n => n + 1)} disabled={authRetryNonce > 0}
-        className="text-sm font-bold text-blue-600 dark:text-blue-400 underline rounded focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 disabled:cursor-wait">{authRetryNonce > 0 ? '重試中…' : '重試身分驗證'}</button>
-    </div> : !isLoggedIn ? <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-8 rounded-2xl shadow-lg mb-10 text-center relative overflow-hidden">
-      <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-slate-200">登入學生權益網</h2>
-      <div className="flex items-center justify-center py-6 relative min-h-[160px] sm:min-h-0">
+        className={ui.secondaryButton}>{authRetryNonce > 0 ? '重試中…' : '重試身分驗證'}</button>
+    </div> : !isLoggedIn ? <div className={`${ui.card} p-6 mb-8 text-center`}>
+      <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-neutral-200">登入學生權益網</h2>
+      <div className="flex items-center justify-center">
         <button type="button" onClick={() => void login()} disabled={loginPending} aria-busy={loginPending}
-          className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xl sm:text-2xl py-6 px-4 sm:px-10 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-150 motion-reduce:transition-none flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-wait">
+          className={`${ui.primaryButton} w-full sm:w-auto flex-col sm:flex-row`}>
           <span aria-live="polite">{loginPending ? '登入中…' : '以學校帳號登入'}</span>
           <span className="text-sm font-normal">（限 @nehs.hc.edu.tw）</span>
         </button>
       </div>
-    </div> : <div className="bg-blue-50 dark:bg-slate-900/80 border border-blue-200 dark:border-slate-800 p-4 rounded-xl mb-8 flex justify-between items-center">
-      <span className="font-bold text-blue-900 dark:text-blue-300">🎉 歡迎回來，{userName}！</span>
-      {isAdmin && <span className="bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs px-3 py-1 rounded-full font-bold">學權組管理員權限</span>}
+    </div> : <div className={`${ui.card} p-4 mb-8 flex flex-wrap justify-between items-center gap-3`}>
+      <span className="font-bold text-gray-800 dark:text-neutral-200 inline-flex items-center gap-2"><PartyPopper aria-hidden="true" className="size-4 shrink-0" /> 歡迎回來，{userName}！</span>
+      {isAdmin && <span className={ui.badge}><ShieldCheck aria-hidden="true" className="size-4 shrink-0" />學權組管理員權限</span>}
     </div>}
   </>;
 }

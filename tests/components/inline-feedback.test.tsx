@@ -4,7 +4,7 @@ import type { AuthContextValue } from '../../components/AuthProvider';
 import type { FeedbackAdminDTO } from '../../lib/rights/queries';
 const mocks = vi.hoisted(() => ({ auth: null as AuthContextValue | null }));
 vi.mock('../../components/AuthProvider', () => ({ useAuth: () => mocks.auth }));
-import AdminFeedbackPanel from '../../components/admin/AdminFeedbackPanel';
+import { InlineFeedbackList } from '../fixtures/inline-feedback';
 
 const row: FeedbackAdminDTO = { id: 'feedback-1', title: '建言', content: 'PRIVATE_ADMIN_CONTENT', category: '其他',
    is_anonymous: false, author_name: '學生', reply: '原有回覆', replied_at: null, created_at: '2026-01-01T00:00:00Z', version: 1 };
@@ -14,10 +14,10 @@ function auth(id = 'admin', generation = 1): AuthContextValue {
 }
 beforeEach(() => { mocks.auth = auth(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-function mount() { return render(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={null} />); }
+function mount() { return render(<InlineFeedbackList feedback={[row]} nextCursor={null} />); }
 function submit(reply = '新回覆') {
   fireEvent.change(screen.getByRole('textbox'), { target: { value: reply } });
-  fireEvent.click(screen.getByRole('button', { name: '發布/更新回覆' }));
+  fireEvent.click(screen.getByRole('button', { name: '發布官方回覆' }));
 }
 test('performs no browser feedback query on mount', () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
@@ -33,7 +33,7 @@ test('saves once through POST helper and refreshes after verified success', asyn
   expect(await screen.findByRole('status')).toHaveTextContent('操作已成功完成。');
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(fetch).toHaveBeenCalledWith('/api/rights/actions', expect.objectContaining({ method: 'POST' }));
-  expect(new URL(String(fetch.mock.calls[1]?.[0]), 'http://localhost').pathname).toBe('/api/rights/admin/feedback');
+  expect(new URL(String(fetch.mock.calls[1]?.[0]), 'http://localhost').pathname).toBe('/api/rights/feedback');
   expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply', payload: { id: row.id, reply: '新回覆', expectedVersion: 1 } });
   expect(screen.getByRole('textbox')).toHaveValue('新回覆');
 });
@@ -45,12 +45,6 @@ test.each(['CONFLICT', 'UNAVAILABLE'])('retains edited input without success whe
   expect(screen.getByRole('textbox')).toHaveValue('新回覆');
   expect(fetch).toHaveBeenCalledOnce();
   expect(screen.queryByText('操作已成功完成。')).not.toBeInTheDocument();
-});
-test.each(['UNAUTHORIZED', 'FORBIDDEN'])('hides private content when action returns %s', async code => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: false, code }, { status: code === 'UNAUTHORIZED' ? 401 : 403 })));
-  mount(); submit();
-  await waitFor(() => expect(screen.queryByText(row.content)).not.toBeInTheDocument());
-  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });
 test('keeps cleared draft without submitting when explicit confirmation is declined', () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
@@ -81,9 +75,9 @@ test('does not restore old-user content or refresh when delayed action finishes 
   vi.stubGlobal('fetch', fetch);
   const view = mount(); submit();
   mocks.auth = auth('other-admin', 2);
-  view.rerender(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={null} />);
+  view.rerender(<InlineFeedbackList feedback={[row]} nextCursor={null} />);
   await act(async () => { finish(Response.json({ ok: true, data: { id: row.id, version: 2 } })); });
-  expect(screen.queryByText(row.content)).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox')).toHaveValue(row.reply);
   expect(fetch).toHaveBeenCalledOnce();
 });
 test('reports committed save separately when refresh fails', async () => {
@@ -111,8 +105,8 @@ test('retains a dirty reply and its original version across server prop refresh'
   const view = mount();
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unreconciled draft' } });
   // When
-  view.rerender(<AdminFeedbackPanel ownerId="admin" feedback={[{ ...row, reply: 'New server reply', version: 2 }]} nextCursor={null} />);
-  fireEvent.click(screen.getByRole('button', { name: '發布/更新回覆' }));
+  view.rerender(<InlineFeedbackList feedback={[{ ...row, reply: 'New server reply', version: 2 }]} nextCursor={null} />);
+  fireEvent.click(screen.getByRole('button', { name: '發布官方回覆' }));
   // Then
   expect(await screen.findByRole('alert')).toHaveTextContent(/草稿已保留.*重新載入/);
   expect(screen.getByRole('textbox')).toHaveValue('Unreconciled draft');
@@ -121,22 +115,22 @@ test('retains a dirty reply and its original version across server prop refresh'
   });
 });
 
-test('appends admin feedback using its server-provided cursor without eagerly looking up authors', async () => {
+test('appends public feedback using its server-provided cursor without eagerly looking up authors', async () => {
   // Given
   const cursor = { created_at: '2026-01-01T00:00:00.123456Z', id: row.id };
   const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
     items: [{ ...row, id: 'next', title: 'Older feedback', content: 'Older body', is_anonymous: true, author_name: 'AUTHOR_SENTINEL' }], nextCursor: null,
   } }));
   vi.stubGlobal('fetch', fetch);
-  render(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={cursor} />);
+  render(<InlineFeedbackList feedback={[row]} nextCursor={cursor} />);
   // When
-  fireEvent.click(screen.getByRole('button', { name: '載入更多管理建言' }));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多建言' }));
   // Then
   expect(await screen.findByText('Older feedback')).toBeVisible();
   expect(screen.getByText(row.content)).toBeVisible();
   expect(fetch).toHaveBeenCalledOnce();
   const url = new URL(String(fetch.mock.calls[0]?.[0]), 'http://localhost');
-  expect(url.pathname).toBe('/api/rights/admin/feedback');
+  expect(url.pathname).toBe('/api/rights/feedback');
   expect(JSON.parse(url.searchParams.get('cursor') ?? 'null')).toEqual(cursor);
   expect(document.body.textContent).not.toContain('AUTHOR_SENTINEL');
 });
@@ -156,13 +150,13 @@ test('reloads second-page versions after a conflict without rebasing a dirty dra
     .mockResolvedValueOnce(Response.json({ ok: true, data: { items: [row], nextCursor: cursor } }))
     .mockResolvedValueOnce(Response.json({ ok: true, data: { items: [{ ...latest, reply: 'Merged reply', version: 3 }], nextCursor: null } }));
   vi.stubGlobal('fetch', fetch);
-  render(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={cursor} />);
-  fireEvent.click(screen.getByRole('button', { name: '載入更多管理建言' }));
+  render(<InlineFeedbackList feedback={[row]} nextCursor={cursor} />);
+  fireEvent.click(screen.getByRole('button', { name: '載入更多建言' }));
   const article = (await screen.findByText(older.title)).closest('article');
   if (!article) throw new TypeError('Missing second-page feedback');
   const editor = within(article);
   fireEvent.change(editor.getByRole('textbox'), { target: { value: 'Unreconciled draft' } });
-  fireEvent.click(editor.getByRole('button', { name: '發布/更新回覆' }));
+  fireEvent.click(editor.getByRole('button', { name: '發布官方回覆' }));
   expect(await editor.findByRole('alert')).toHaveTextContent(/草稿已保留.*重新載入/);
   // When
   fireEvent.click(editor.getByRole('button', { name: '重新載入最新資料' }));
@@ -172,8 +166,8 @@ test('reloads second-page versions after a conflict without rebasing a dirty dra
   expect(editor.getByRole('textbox')).toHaveValue('Unreconciled draft');
   const reloadUrl = new URL(String(fetch.mock.calls[3]?.[0]), 'http://localhost');
   expect(JSON.parse(reloadUrl.searchParams.get('cursor') ?? 'null')).toEqual(cursor);
-  fireEvent.click(editor.getByRole('button', { name: '發布/更新回覆' }));
-  await editor.findByRole('button', { name: '發布/更新回覆' });
+  fireEvent.click(editor.getByRole('button', { name: '發布官方回覆' }));
+  await editor.findByRole('button', { name: '發布官方回覆' });
   expect(JSON.parse(String(fetch.mock.calls[4]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply',
     payload: { id: older.id, reply: 'Unreconciled draft', expectedVersion: 1 } });
   vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -181,7 +175,7 @@ test('reloads second-page versions after a conflict without rebasing a dirty dra
   expect(window.confirm).toHaveBeenCalledOnce();
   expect(editor.getByRole('textbox')).toHaveValue(latest.reply);
   fireEvent.change(editor.getByRole('textbox'), { target: { value: 'Merged reply' } });
-  fireEvent.click(editor.getByRole('button', { name: '發布/更新回覆' }));
+  fireEvent.click(editor.getByRole('button', { name: '發布官方回覆' }));
   expect(await editor.findByRole('status')).toHaveTextContent('操作已成功完成。');
   expect(JSON.parse(String(fetch.mock.calls[5]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply',
     payload: { id: older.id, reply: 'Merged reply', expectedVersion: 2 } });
@@ -195,7 +189,7 @@ test.each(['known', 'legacy_unverified', 'unknown'] as const)('reveals only reli
     attribution, user_id: 'PRIVATE_UUID', email: 'PRIVATE_EMAIL', display_name: 'PRIVATE_NAME',
   } }));
   vi.stubGlobal('fetch', fetch);
-  render(<AdminFeedbackPanel ownerId="admin" feedback={[{ ...row, is_anonymous: true }]} nextCursor={null} />);
+  render(<InlineFeedbackList feedback={[{ ...row, is_anonymous: true }]} nextCursor={null} />);
   expect(fetch).not.toHaveBeenCalled();
   expect(document.body.textContent).not.toMatch(/PRIVATE_UUID|PRIVATE_EMAIL|PRIVATE_NAME/);
   // When
@@ -212,7 +206,7 @@ test.each(['known', 'legacy_unverified', 'unknown'] as const)('reveals only reli
     expect(document.body.textContent).not.toMatch(/PRIVATE_UUID|PRIVATE_EMAIL|PRIVATE_NAME/);
     expect(screen.getByText(/無法.*還原身分/)).toBeVisible();
   }
-  expect(screen.getByText('發布者：匿名同學')).toBeVisible();
+  expect(screen.getByText('— 匿名學生')).toBeVisible();
 });
 
 test('never fetches or renders author identity for a nonadmin even with stale server props', () => {
@@ -223,7 +217,7 @@ test('never fetches or renders author identity for a nonadmin even with stale se
   // When
   mount();
   // Then
-  expect(screen.queryByText(row.content)).toBeNull();
+  expect(screen.getByText(row.content)).toBeVisible();
   expect(screen.queryByRole('button', { name: /查看作者/ })).toBeNull();
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -236,11 +230,11 @@ test('discards delayed author results when the admin session changes', async () 
   fireEvent.click(screen.getByRole('button', { name: /查看作者/ }));
   // When
   mocks.auth = auth('other-admin', 2);
-  view.rerender(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={null} />);
+  view.rerender(<InlineFeedbackList feedback={[row]} nextCursor={null} />);
   await act(async () => finish(Response.json({ ok: true, data: { attribution: 'known', user_id: 'stale', email: 'STALE_IDENTITY', display_name: 'stale' } })));
   // Then
   expect(document.body.textContent).not.toContain('STALE_IDENTITY');
-  expect(screen.queryByText(row.content)).toBeNull();
+  expect(screen.getByText(row.content)).toBeVisible();
 });
 
 test('adopts newer server versions for a clean acknowledged reply instead of keeping a stale write base', async () => {
@@ -253,16 +247,16 @@ test('adopts newer server versions for a clean acknowledged reply instead of kee
   const view = mount(); submit('Saved reply');
   expect(await screen.findByRole('status')).toHaveTextContent('操作已成功完成。');
   // When
-  view.rerender(<AdminFeedbackPanel ownerId="admin" feedback={[{ ...row, reply: 'Newest reply', version: 3 }]} nextCursor={null} />);
+  view.rerender(<InlineFeedbackList feedback={[{ ...row, reply: 'Newest reply', version: 3 }]} nextCursor={null} />);
   submit('Next edit');
   // Then
-  await waitFor(() => expect(screen.getByRole('button', { name: '發布/更新回覆' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: '發布官方回覆' })).toBeEnabled());
   expect(fetch).toHaveBeenCalledTimes(4);
   expect(JSON.parse(String(fetch.mock.calls[2]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply',
     payload: { id: row.id, reply: 'Next edit', expectedVersion: 3 } });
 });
 
-test('retains the twentieth admin draft and original base after an insert moves the row to a continuation', async () => {
+test('retains the twentieth inline draft and original base after an insert moves the row to a continuation', async () => {
   // Given a full first page whose oldest row has an unsaved reply.
   const first = Array.from({ length: 19 }, (_, index) => ({ ...row, id: `first-${index}`, title: `First ${index}` }));
   const initial = [...first, row];
@@ -273,7 +267,7 @@ test('retains the twentieth admin draft and original base after an insert moves 
     items: [{ ...row, reply: 'Concurrent server reply', version: 2 }], nextCursor: null,
   } })).mockResolvedValueOnce(Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 }));
   vi.stubGlobal('fetch', fetch);
-  render(<AdminFeedbackPanel ownerId="admin" feedback={initial} nextCursor={null} />);
+  render(<InlineFeedbackList feedback={initial} nextCursor={null} />);
   const article = screen.getByText(row.title).closest('article');
   if (!article) throw new TypeError('Missing twentieth feedback');
   fireEvent.change(within(article).getByRole('textbox'), { target: { value: 'Unsaved admin draft' } });
@@ -281,14 +275,14 @@ test('retains the twentieth admin draft and original base after an insert moves 
   fireEvent.click(screen.getByRole('button', { name: '重新載入建言清單' }));
   await screen.findByText('Newer inserted feedback');
   expect(screen.queryByText(row.title)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '載入更多管理建言' }));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多建言' }));
   const restored = (await screen.findByText(row.title)).closest('article');
   if (!restored) throw new TypeError('Missing restored feedback');
   const editor = within(restored);
   // Then remount preserves both the input and the version it was edited against.
   expect(editor.getByRole('textbox')).toHaveValue('Unsaved admin draft');
   expect(editor.getByRole('button', { name: '捨棄草稿並使用最新內容' })).toBeVisible();
-  fireEvent.click(editor.getByRole('button', { name: '發布/更新回覆' }));
+  fireEvent.click(editor.getByRole('button', { name: '發布官方回覆' }));
   await editor.findByRole('alert');
   expect(JSON.parse(String(fetch.mock.calls[2]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply',
     payload: { id: row.id, reply: 'Unsaved admin draft', expectedVersion: 1 } });
@@ -302,11 +296,11 @@ test.each(['identity', 'generation'] as const)('does not expose an admin draft a
   const nextId = change === 'identity' ? 'other-admin' : 'admin';
   mocks.auth = auth(nextId, change === 'generation' ? 2 : 1);
   // When the same entity is rendered for a different owner/session.
-  view.rerender(<AdminFeedbackPanel ownerId={nextId} feedback={[row]} nextCursor={null} />);
+  view.rerender(<InlineFeedbackList feedback={[row]} nextCursor={null} />);
   // Then neither the new owner nor a subsequent return recovers the old draft.
   expect(screen.getByRole('textbox')).toHaveValue(row.reply);
   mocks.auth = auth();
-  view.rerender(<AdminFeedbackPanel ownerId="admin" feedback={[row]} nextCursor={null} />);
+  view.rerender(<InlineFeedbackList feedback={[row]} nextCursor={null} />);
   expect(screen.getByRole('textbox')).toHaveValue(row.reply);
 });
 
@@ -323,7 +317,7 @@ test('retains a clean acknowledged receipt across row movement until the server 
   submit('Acknowledged reply');
   await screen.findByText('New first row');
   expect(screen.queryByText(row.title)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '載入更多管理建言' }));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多建言' }));
   const article = (await screen.findByText(row.title)).closest('article');
   if (!article) throw new TypeError('Missing acknowledged feedback');
   const editor = within(article);
@@ -331,7 +325,7 @@ test('retains a clean acknowledged receipt across row movement until the server 
   expect(editor.getByRole('textbox')).toHaveValue('Acknowledged reply');
   expect(editor.queryByRole('button', { name: '捨棄草稿並使用最新內容' })).toBeNull();
   fireEvent.change(editor.getByRole('textbox'), { target: { value: 'Next reply' } });
-  fireEvent.click(editor.getByRole('button', { name: '發布/更新回覆' }));
+  fireEvent.click(editor.getByRole('button', { name: '發布官方回覆' }));
   await editor.findByRole('alert');
   expect(JSON.parse(String(fetch.mock.calls[3]?.[1]?.body))).toEqual({ action: 'saveFeedbackReply',
     payload: { id: row.id, reply: 'Next reply', expectedVersion: 2 } });

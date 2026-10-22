@@ -5,19 +5,25 @@ export async function moderation(page: Page, context: BrowserContext, request: A
   await login(context, 'admin');
   await page.goto('/proposals');
   await expect(page.getByText('Fixture 待審核', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /核可發布/ }).click();
-  await expect(page.getByRole('button', { name: /核可發布/ })).toHaveCount(0);
-  expect((await state(request)).rows('proposals').find(row => row.id === 'proposal-2')?.status).toBe('研議中');
-  const card = page.locator('[id^="item-"]').filter({ has: page.getByRole('heading', { name: 'Fixture 研議中', exact: true }) });
-  await card.getByLabel('提案狀態：Fixture 研議中', { exact: true }).selectOption('通過');
-  await card.getByLabel('官方回覆：Fixture 研議中', { exact: true }).fill('Moderation reply');
+  const summary = page.getByRole('button', { name: /^待審核.*Fixture 待審核/ });
+  await summary.press('Enter');
+  await expect(page.locator('#pending-detail-proposal-2')).toBeVisible();
+  await expect(summary).toHaveAttribute('aria-expanded', 'true');
+  await expect(page).toHaveURL(`${appURL}/proposals`);
+  expect((await state(request)).requests.some(entry => entry.path.endsWith('/rights_get_public_item'))).toBe(false);
+  await page.getByRole('button', { name: /核准上架/ }).click();
+  await expect(page.getByRole('button', { name: /核准上架/ })).toHaveCount(0);
+  expect((await state(request)).rows('proposals').find(row => row.id === 'proposal-2')?.status).toBe('處理中');
+  const card = page.locator('[id^="item-"]').filter({ has: page.getByRole('heading', { name: 'Fixture 處理中', exact: true }) });
+  await card.getByLabel('提案狀態：Fixture 處理中', { exact: true }).selectOption('已結案');
+  await card.getByLabel('官方回覆：Fixture 處理中', { exact: true }).fill('Moderation reply');
   await card.getByRole('button', { name: /儲存修改/ }).click();
   await expect(card.getByText('Moderation reply', { exact: true })).toBeVisible();
   await card.getByRole('button', { name: '刪除留言：Fixture comment', exact: true }).click();
   await expect(card.getByText('Fixture comment', { exact: true })).toHaveCount(0);
   await capture(page, 'admin-moderation');
   await card.getByRole('button', { name: /刪除/, exact: false }).click();
-  await expect(page.getByRole('heading', { name: 'Fixture 研議中', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Fixture 處理中', exact: true })).toHaveCount(0);
   await page.goto('/');
   await page.getByPlaceholder('欄位標題...').fill('Browser announcement');
   await page.getByPlaceholder('欄位內容與公告細節...').fill('Browser announcement body');
@@ -35,9 +41,11 @@ export async function moderation(page: Page, context: BrowserContext, request: A
   await page.getByRole('button', { name: /退回提案/ }).click();
   await expect(page.getByRole('button', { name: /退回提案/ })).toHaveCount(0);
   expect((await state(request)).rows('proposals').find(row => row.title === '[其他] Reject in browser')?.status).toBe('被退回');
-  await page.goto('/admin');
+  await page.goto('/feedback');
   await page.getByRole('button', { name: '刪除建言', exact: true }).click();
-  await expect(page.getByText('目前沒有收到建言。', { exact: true })).toBeVisible();
+  await expect(page.getByText('目前沒有待回覆建言', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: /^全部/ }).click();
+  await expect(page.getByText('目前尚無意見回饋。', { exact: true })).toBeVisible();
   expect((await state(request)).total).toBe(9);
   for (const action of [
     { action: 'rejectProposal', payload: { id: 'missing', expectedVersion: 1 } },
@@ -56,7 +64,7 @@ export async function delayedLogout(page: Page, context: BrowserContext) {
   let seenPending: (() => void) | undefined;
   const pendingSeen = new Promise<void>(resolve => { seenPending = resolve; });
   const pendingGate = new Promise<void>(resolve => { releasePending = resolve; });
-  await page.route('**/api/rights/proposals/pending*', async route => {
+  await page.route(/\/api\/rights\/queue\?kind=pending(?:&|$)/, async route => {
     const response = await route.fetch();
     seenPending?.();
     await pendingGate;

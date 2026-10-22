@@ -40,7 +40,7 @@ export function admin(data: FixtureData, user: User | undefined) {
   return actor;
 }
 export function publicProposal(row: Row) {
-  return ['研議中', '通過', '已採納', '不採納'].includes(String(row.status));
+  return ['處理中', '已結案'].includes(String(row.status));
 }
 export function target(rows: readonly Row[], id: unknown) {
   const key = requiredText(id, 128);

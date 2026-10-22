@@ -34,7 +34,7 @@ export function createFixtureData() {
     Object.assign(tables, {
       admins: [{ email: fixtureUsers.admin.email }],
       home_sections: [{ id: 'section-1', title: 'Offline fixture announcement', content: 'Fixture home content', created_at: '2026-01-01T00:00:00Z' }],
-      proposals: ['研議中', '待審核', '被退回', 'unknown'].map((status, index) => ({
+      proposals: ['處理中', '待審核', '被退回', 'unknown'].map((status, index) => ({
         id: `proposal-${index + 1}`, title: `Fixture ${status}`, content: 'Fixture proposal', status,
         author_name: 'Fixture student', is_anonymous: false, upvotes_count: 0, reply: '', created_at: '2026-01-01T00:00:00Z', secret: 'PRIVATE_SENTINEL',
       })),

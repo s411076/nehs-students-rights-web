@@ -5,6 +5,9 @@ import type { SessionIdentity } from '@/lib/auth/types';
 import { createClient } from '@/lib/supabase';
 import { consumeOAuthResultParams, hasOAuthResultParams, resolveOAuthCompletion } from '@/lib/auth/oauth-completion';
 import type { CompletionResult } from '@/lib/auth/oauth-completion';
+import { VerificationContext } from './VerificationContext';
+import type { VerificationState } from './VerificationContext';
+import { VerificationBanner } from './VerificationBanner';
 
 type OAuthReturn = {
   readonly intended: boolean;
@@ -80,6 +83,18 @@ function parseIdentity(value: unknown): Readonly<SessionIdentity> {
   return { id: value.id, email: value.email, displayName: value.displayName, isAdmin: value.isAdmin };
 }
 
+function sameIdentity(
+  left: Readonly<SessionIdentity> | null,
+  right: Readonly<SessionIdentity> | null,
+): boolean {
+  if (left === null || right === null) return left === null && right === null;
+  return left.id === right.id && left.email === right.email && left.isAdmin === right.isAdmin;
+}
+
+type SessionCheck =
+  | { readonly status: 'verified'; readonly identity: Readonly<SessionIdentity> }
+  | { readonly status: 'anonymous' | 'ineligible' | 'unavailable'; readonly identity: null };
+
 export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [oauthReturn] = useState(captureOAuthReturn);
   const [state, setState] = useState<AuthState>({ status: 'loading', identity: null, generation: 0 });
@@ -88,6 +103,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const logoutBlocked = useRef(false);
   const pendingLogout = useRef(false);
   const invalidateLogout = useRef(() => {});
+  const retryVerification = useRef(() => {});
+  const [verification, setVerification] = useState<VerificationState>({ status: 'checking', epoch: 0 });
+  const verificationRef = useRef(verification);
+  const retry = useCallback(() => { retryVerification.current(); }, []);
+  const isCurrent = useCallback((epoch: number) => !logoutBlocked.current &&
+    verificationRef.current.status === 'ready' && verificationRef.current.epoch === epoch, []);
   const beginLogout = useCallback(() => {
     logoutBlocked.current = true;
     pendingLogout.current = true;
@@ -102,62 +123,108 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     let active = true;
     let generation = 0;
+    let sequence = 0;
     let controller = new AbortController();
-    const current = (version: number) => active && version === generation;
+    let committedIdentity: Readonly<SessionIdentity> | null = null;
+    const commit = (next: AuthState) => {
+      committedIdentity = next.identity;
+      setState(next);
+    };
+    const readiness = (status: VerificationState['status']) => {
+      const next = { status, epoch: sequence };
+      verificationRef.current = next;
+      setVerification(next);
+    };
     const invalidate = (status: 'loading' | 'anonymous') => {
       controller.abort();
-      controller = new AbortController();
+      sequence++;
       generation++;
-      setState({ status, identity: null, generation });
-      return generation;
+      commit({ status, identity: null, generation });
+      readiness('ready');
     };
     invalidateLogout.current = () => { invalidate('anonymous'); };
-    const verify = async (version: number) => {
-      if (!current(version)) return;
+    const verify = async (request: { readonly sequence: number; readonly generation: number; readonly controller: AbortController }) => {
+      const current = () => active && request.sequence === sequence && request.generation === generation && !logoutBlocked.current;
+      if (!current()) return;
+      let next: SessionCheck;
       try {
         const response = await fetch('/api/rights/session', {
           credentials: 'same-origin', cache: 'no-store',
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+          signal: AbortSignal.any([request.controller.signal, AbortSignal.timeout(15_000)]),
         });
-        let next: AuthState;
         switch (response.status) {
-          case 200: next = { status: 'verified', identity: parseIdentity(await response.json()), generation: version }; break;
-          case 401: next = { status: 'anonymous', identity: null, generation: version }; break;
-          case 403: next = { status: 'ineligible', identity: null, generation: version }; break;
-          default: next = { status: 'unavailable', identity: null, generation: version };
-        }
-        if (current(version)) {
-          setState(next);
-          if (next.status === 'verified') setLogoutError(null);
+          case 200: next = { status: 'verified', identity: parseIdentity(await response.json()) }; break;
+          case 401: next = { status: 'anonymous', identity: null }; break;
+          case 403: next = { status: 'ineligible', identity: null }; break;
+          default: next = { status: 'unavailable', identity: null };
         }
       } catch (error) {
-        // The network/JSON boundary fails closed, including SDK/storage restrictions.
-        if (current(version)) setState({ status: 'unavailable', identity: null, generation: version });
+        if (!(error instanceof Error || error instanceof DOMException)) throw error;
+        next = { status: 'unavailable', identity: null };
+      }
+      if (!current()) return;
+      switch (next.status) {
+        case 'unavailable':
+          if (committedIdentity === null) commit({ ...next, generation });
+          readiness('unavailable');
+          return;
+        case 'verified':
+          if (committedIdentity !== null && !sameIdentity(committedIdentity, next.identity)) generation++;
+          commit({ ...next, generation });
+          readiness('ready');
+          setLogoutError(null);
+          return;
+        case 'anonymous':
+        case 'ineligible':
+          if (committedIdentity !== null) generation++;
+          commit({ ...next, generation });
+          readiness('ready');
+          return;
+        default: return assertNever(next);
       }
     };
+    const startCheck = (deferred: boolean) => {
+      if (!active || logoutBlocked.current) return;
+      controller.abort();
+      controller = new AbortController();
+      const request = { sequence: ++sequence, generation, controller };
+      readiness('checking');
+      if (deferred) queueMicrotask(() => { void verify(request); });
+      else void verify(request);
+    };
+    retryVerification.current = () => { startCheck(false); };
     let unsubscribe = () => {};
     try {
-      const { data } = createClient().auth.onAuthStateChange((event) => {
+      const { data } = createClient().auth.onAuthStateChange((event, session) => {
         if (!active || event === 'INITIAL_SESSION') return;
         // Logout holds identity closed; only a later explicit sign-in can recover.
         if (logoutBlocked.current && event !== 'SIGNED_OUT') {
           if (pendingLogout.current || event !== 'SIGNED_IN') return;
           logoutBlocked.current = false;
         }
-        const version = invalidate(event === 'SIGNED_OUT' ? 'anonymous' : 'loading');
-        if (event !== 'SIGNED_OUT') queueMicrotask(() => { void verify(version); });
+        if (event === 'SIGNED_OUT') {
+          logoutBlocked.current = true;
+          invalidate('anonymous');
+          return;
+        }
+        if ((event === 'SIGNED_IN' && committedIdentity === null) ||
+          (committedIdentity && session?.user.id && session.user.id !== committedIdentity.id)) invalidate('loading');
+        startCheck(true);
       });
       unsubscribe = () => data.subscription.unsubscribe();
-      void verify(generation);
+      startCheck(false);
     } catch (error) {
-      // Client initialization is a boundary: unavailable never retains privilege.
-      setState({ status: 'unavailable', identity: null, generation });
+      if (!(error instanceof Error || error instanceof DOMException)) throw error;
+      commit({ status: 'unavailable', identity: null, generation });
+      readiness('unavailable');
     }
     return () => {
       active = false;
       generation++;
+      sequence++;
       controller.abort();
       invalidateLogout.current = () => {};
+      retryVerification.current = () => {};
       unsubscribe();
     };
   }, []);
@@ -168,7 +235,13 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   };
   return <LogoutNoticeContext.Provider value={{ logoutError, logoutPending, beginLogout, reportLogoutFailure }}>
     <OAuthReturnContext.Provider value={oauthReturn}>
-      <Context.Provider value={value}><Fragment key={state.generation}>{children}</Fragment></Context.Provider>
+      <Context.Provider value={value}>
+        <VerificationContext.Provider value={{ ...verification, canWrite: verification.status === 'ready', retry, isCurrent }}>
+          <VerificationBanner hasIdentity={state.identity !== null} />
+          <Fragment key={state.generation}>{children}</Fragment>
+        </VerificationContext.Provider>
+      </Context.Provider>
     </OAuthReturnContext.Provider>
   </LogoutNoticeContext.Provider>;
 }
+function assertNever(value: never): never { throw new TypeError(`Unknown session state: ${value}`); }

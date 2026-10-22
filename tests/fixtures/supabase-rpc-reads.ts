@@ -74,6 +74,7 @@ export function readRpc(data: FixtureData, name: string, context: { readonly bod
     case 'rights_list_public_comments': table = 'proposal_comments'; ascending = true; break;
     case 'rights_list_pending_proposals': admin(data, user); table = 'proposals'; privileged = true; break;
     case 'rights_list_admin_feedback': admin(data, user); table = 'feedback'; privileged = true; break;
+    case 'rights_queue_page': return queueRpc(data, { body, user });
     default: throw new FixtureRpcError(400, 'Unknown read RPC');
   }
   const limit = body.p_limit === undefined ? 20 : body.p_limit;
@@ -102,4 +103,50 @@ function kindTable(kind: unknown, comments = false): 'proposals' | 'feedback' | 
     case 'comment': if (comments) return 'proposal_comments';
   }
   throw new FixtureRpcError(400, 'Invalid kind');
+}
+// Filtered queue fixture: counts cover every query-matched row before the
+// selected filter/cursor/limit; total equals counts[filter]. Oldest-first for
+// awaiting and pending, newest-first otherwise.
+function queueRpc(data: FixtureData, context: { readonly body: Row; readonly user: User | undefined }): unknown {
+  const { body, user } = context;
+  const kind = body.p_kind;
+  const filter = typeof body.p_filter === 'string' ? body.p_filter : '';
+  const valid = (kind === 'feedback' && ['all', 'awaiting', 'replied'].includes(filter)) ||
+    (kind === 'proposal' && ['all', 'processing', 'closed'].includes(filter)) ||
+    (kind === 'pending' && filter === 'pending');
+  if (!valid) throw new FixtureRpcError(400, 'Invalid queue filter');
+  if (kind === 'pending') admin(data, user);
+  const limit = body.p_limit === undefined ? 20 : body.p_limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 50) throw new FixtureRpcError(400, 'Invalid limit');
+  const after = cursor(body.p_cursor);
+  const query = body.p_query === undefined ? '' : text(body.p_query, 100).toLowerCase();
+  const ascending = (kind === 'feedback' && filter === 'awaiting') || kind === 'pending';
+  const direction = ascending ? 1 : -1;
+  const table: Table = kind === 'feedback' ? 'feedback' : 'proposals';
+  const queried = data.tables[table].filter(row => {
+    if (table === 'proposals' && (kind === 'pending' ? row.status !== '待審核' : !publicProposal(row))) return false;
+    if (query && ![row.title, row.content].some(value => String(value).toLowerCase().includes(query))) return false;
+    return true;
+  });
+  const tally = (predicate: (row: Row) => boolean) => queried.filter(predicate).length;
+  const counts: Record<string, number> = kind === 'feedback'
+    ? { all: queried.length, awaiting: tally(row => row.reply === ''), replied: tally(row => row.reply !== '') }
+    : kind === 'proposal'
+      ? { all: queried.length, processing: tally(row => row.status === '處理中'), closed: tally(row => row.status === '已結案') }
+      : { pending: queried.length };
+  const rows = queried.filter(row => {
+    if (kind === 'feedback') {
+      if (filter === 'awaiting' && row.reply !== '') return false;
+      if (filter === 'replied' && row.reply === '') return false;
+    } else if (kind === 'proposal') {
+      if (filter === 'processing' && row.status !== '處理中') return false;
+      if (filter === 'closed' && row.status !== '已結案') return false;
+    }
+    return !after || compare(row, after) * direction > 0;
+  }).sort((a, b) => compare(a, b) * direction);
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  return { items: page.map(row => projectRpcRow(data, table, { row, user })),
+    nextCursor: rows.length > limit && last ? { created_at: last.created_at, id: last.id } : null,
+    total: counts[filter], counts };
 }

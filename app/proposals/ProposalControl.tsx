@@ -7,10 +7,13 @@ import { useRightsMutation } from '@/components/rights/useRightsMutation';
 import { ActionFeedback } from '@/components/rights/ActionFeedback';
 import { DraftReconciliation } from '@/components/rights/DraftReconciliation';
 import { useProposalControlDraft } from '@/components/rights/RightsDraftProvider';
+import { PencilLine, Save, ShieldCheck } from 'lucide-react';
+import { ui } from '@/components/rights/ui';
 
 export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO; readonly refresh: () => Promise<unknown> }) {
   const draft = useVersionedDraft({ status: item.status, reply: item.reply }, item.version, useProposalControlDraft(item.id));
-  const mutation = useRightsMutation();
+  const mutation = useRightsMutation({ key: `control:${item.id}`, label: `「${item.title}」狀態與官方回覆` });
+  const isClosed = draft.value.status === '已結案';
   const save = async () => {
     const value = draft.value;
     if (item.reply && !value.reply.trim() && !window.confirm('確定要清除官方回覆嗎？')) return;
@@ -18,27 +21,28 @@ export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO;
       id: item.id, status: value.status, reply: value.reply, expectedVersion: draft.baseVersion,
     } }, refresh, receipt => draft.acknowledge(receipt, value));
   };
-  return <div className="p-4 bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200 dark:border-slate-700 rounded-xl space-y-3 mt-3">
-    <div className="text-xs font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1">🔑 管理員控制台（修改狀態與官方回覆）：</div>
-    <ActionFeedback error={mutation.error} notice={mutation.notice} />
+  return <div className={`${ui.card} p-4 space-y-3 mt-3`}>
+    <div className="text-sm font-bold text-gray-800 dark:text-neutral-200 flex items-center gap-1.5"><ShieldCheck aria-hidden="true" className="size-4 shrink-0" /> 管理員控制台（修改狀態與官方回覆）：</div>
+    <ActionFeedback {...mutation.feedback} />
     <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
       <div className="space-y-1">
-        <label htmlFor={`proposal-status-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-slate-300">提案狀態<span className="sr-only">：{item.title}</span></label>
+        <label htmlFor={`proposal-status-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-neutral-300">提案狀態<span className="sr-only">：{item.title}</span></label>
         <select id={`proposal-status-${item.id}`} value={draft.value.status} disabled={mutation.busy}
           onChange={event => draft.edit({ ...draft.value, status: event.target.value })}
-          className="w-full p-2 border border-purple-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-xs font-semibold text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500">
+          className={ui.field}>
           {CONTROL_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
         </select>
       </div>
       <div className="min-w-0 flex-1 space-y-1">
-        <label htmlFor={`proposal-reply-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-slate-300">官方回覆<span className="sr-only">：{item.title}</span></label>
+        <label htmlFor={`proposal-reply-${item.id}`} className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-neutral-300"><PencilLine aria-hidden="true" className="size-4 shrink-0" />官方回覆<span className="sr-only">：{item.title}</span></label>
+        {isClosed && <p className="text-xs text-gray-500 dark:text-neutral-400">已結案請以「決議：採納／不採納＋理由」格式填寫官方回覆。</p>}
         <input id={`proposal-reply-${item.id}`} type="text" value={draft.value.reply} disabled={mutation.busy}
-          onChange={event => draft.edit({ ...draft.value, reply: event.target.value })} placeholder="輸入官方回覆內容..."
-          className="w-full p-2 border border-purple-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-xs text-gray-800 dark:text-slate-200 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500" />
+          onChange={event => draft.edit({ ...draft.value, reply: event.target.value })} placeholder={isClosed ? '決議：採納／不採納＋理由，例如：決議：採納，圖書館延長開放時間…' : '輸入官方回覆內容...'}
+          className={ui.field} />
       </div>
-      <button type="button" onClick={() => void save()} disabled={mutation.busy}
-        className="min-h-11 px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-medium rounded-xl transition disabled:opacity-50 shrink-0 shadow-sm">
-        {mutation.busy ? '儲存中...' : '💾 儲存修改'}
+      <button type="button" onClick={() => void save()} disabled={mutation.busy || !mutation.canWrite}
+        className={ui.primaryButton}>
+        <Save aria-hidden="true" className="size-4 shrink-0" />{mutation.busy ? '儲存中...' : '儲存修改'}
       </button>
     </div>
     <DraftReconciliation stale={draft.stale} reload={refresh} reset={draft.reset} busy={mutation.busy} />

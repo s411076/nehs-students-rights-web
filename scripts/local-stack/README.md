@@ -117,22 +117,26 @@ Current local CLI guide consulted:
 Next automatically reads project `.env*` files, so an allowlisted child environment
 alone would not be sufficient: the source snapshot excludes them entirely.
 
-## Apply a completed hardening migration, then test
+## Apply the completed migration chain, then test
 
 Do not watch, poll, or apply a migration while its SQL owner is writing it.
 Wait for the owner's explicit completion notice, review the file, then obtain
-its SHA-256. The command refuses application until baseline HTTP checks passed
-and the explicit checksum matches the bytes it reads. It only targets its own
+each file's SHA-256. The command refuses application until baseline HTTP checks passed
+and every explicit checksum matches the bytes it reads, in the order listed in
+`scripts/database/migrations.mjs`. It only targets its own
 labeled synthetic container, never the recovery container or SQL agent DB.
 
 ```sh
-shasum -a 256 supabase/migrations/COMPLETED_FILE.sql
-node scripts/local-stack/stack.mjs apply "$STATE" \
-  supabase/migrations/COMPLETED_FILE.sql SHA256_FROM_COMPLETED_FILE
+shasum -a 256 supabase/migrations/*.sql
+# Supply one reviewed hash per manifest entry, in manifest order.
+node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2
 node tests/real/boundary.http.mjs "$STATE"
 ```
 
-Migration is applied once per fixture; schema cache receives a reload notification.
+The complete chain is applied once per fresh fixture; update the hash arguments
+when the manifest gains a migration. This fixture command is not a production
+migration runner: production must apply only versions missing from its history.
+The schema cache receives a reload notification.
 If SQL fails, discard this fixture and start a new baseline: do not retry a
 partially applied migration. The hardened suite verifies raw sensitive table
 denial, public Page RPC projection, and independent rejection of anon, outsider

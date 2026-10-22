@@ -9,6 +9,7 @@ import { parseActionRequest } from '../../lib/rights/validation';
 import type { FeedbackPublicDTO } from '../../lib/rights/queries';
 import { toFeedbackPublicDTO } from '../../lib/rights/queries';
 import { usePublicItemLink } from '../../components/rights/usePublicItemLink';
+import { feedbackQueuePage, pendingQueuePage, proposalQueuePage, queuePage } from '../fixtures/queue-pages';
 
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 vi.mock('@supabase/supabase-js', () => ({
@@ -62,8 +63,8 @@ const anonymousRow = {
    is_anonymous: true, reply: '', replied_at: null, created_at: '2026-01-01T00:00:00Z', version: 1,
 };
 
-function feedbackResponse(rows: unknown[]) {
-  return Response.json({ ok: true, data: { items: rows, nextCursor: null } });
+function feedbackResponse(rows: readonly FeedbackPublicDTO[], path?: string) {
+  return Response.json({ ok: true, data: feedbackQueuePage(rows, path) });
 }
 function actionSuccess(data: unknown = { inserted: true, id: 'new-feedback', version: 1 }) {
   return Response.json({ ok: true, data });
@@ -83,19 +84,24 @@ function stubFetch(handler: (url: string, init?: RequestInit) => Response | Prom
   return calls;
 }
 
-function feedbackListFetch(rows: unknown[] = [namedRow, anonymousRow]) {
+function feedbackListFetch<T extends FeedbackPublicDTO>(rows?: readonly T[]) {
+  let population: readonly FeedbackPublicDTO[] = rows ?? [namedRow, anonymousRow];
   return stubFetch((url, init) => {
     if (url.includes('/api/rights/actions')) {
       const parsed = parseActionRequest(JSON.parse(String(init?.body)));
       if (!parsed.ok) throw new TypeError('Invalid test mutation');
       switch (parsed.data.action) {
         case 'saveFeedbackReply': return actionSuccess({ id: parsed.data.payload.id, version: 2 });
-        case 'deleteFeedback': return actionSuccess({ id: parsed.data.payload.id, deleted: true });
+        case 'deleteFeedback': {
+          const id = parsed.data.payload.id;
+          population = population.filter(row => row.id !== id);
+          return actionSuccess({ id, deleted: true });
+        }
         case 'createFeedback': return actionSuccess();
         default: throw new TypeError('Unexpected feedback action');
       }
     }
-    if (url.includes('/api/rights/feedback')) return feedbackResponse(rows);
+    if (url.includes('/api/rights/queue')) return feedbackResponse(population, url);
     throw new Error(`Unexpected fetch ${url}`);
   });
 }
@@ -130,7 +136,7 @@ test('source hygiene: no direct browser writes, admin constants, or storage fall
   expect(source).not.toMatch(/author_name:\s*authorName/);
   // And the page consumes the provider plus the public/actions APIs.
   expect(source).toMatch(/useAuth\(\)/);
-  expect(source).toMatch(/\/api\/rights\/feedback|RIGHTS_FEEDBACK_PATH/);
+  expect(source).toMatch(/useRightsQueue/);
   expect(source).toMatch(/sendRightsAction|createRightsActionFlight/);
 });
 
@@ -242,7 +248,7 @@ test('failed submit shows error without success and retains input text', async (
   // Given
   stubFetch(url => {
     if (url.includes('/api/rights/actions')) return actionFailure();
-    return feedbackResponse([namedRow]);
+    return feedbackResponse([namedRow], url);
   });
   render(<FeedbackPage />);
   await screen.findByText('Fixture suggestion');
@@ -275,7 +281,7 @@ test('loading, error, and empty states stay distinct', async () => {
   let resolveList!: (response: Response) => void;
   const gate = new Promise<Response>(done => { resolveList = done; });
   stubFetch(url => {
-    if (url.includes('/api/rights/feedback')) return gate;
+    if (url.includes('/api/rights/queue')) return gate;
     return actionSuccess();
   });
   render(<FeedbackPage />);
@@ -304,6 +310,7 @@ test('clearing a nonempty reply requires confirmation', async () => {
   const calls = feedbackListFetch([withReply]);
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   render(<FeedbackPage />);
+  fireEvent.click(screen.getByRole('tab', { name: /^已回覆/ }));
   await screen.findByText('Existing official reply');
   const box = screen.getByPlaceholderText('請在此輸入官方回應內容...');
   // When clearing is cancelled
@@ -341,7 +348,7 @@ test('double submit sends a single mutation (single-flight)', async () => {
   const gate = new Promise<Response>(done => { resolveAction = done; });
   const calls = stubFetch(url => {
     if (url.includes('/api/rights/actions')) return gate;
-    return feedbackResponse([namedRow]);
+    return feedbackResponse([namedRow], url);
   });
   render(<FeedbackPage />);
   await screen.findByText('Fixture suggestion');
@@ -361,7 +368,9 @@ test('loads feedback continuations using the exact cursor and keeps prior cards'
   const cursor = { created_at: '2026-01-01T00:00:00.123456Z', id: namedRow.id };
   const calls = stubFetch(url => {
     const next = new URL(url, 'http://localhost').searchParams.has('cursor');
-    return Response.json({ ok: true, data: { items: [next ? anonymousRow : namedRow], nextCursor: next ? null : cursor } });
+    return Response.json({ ok: true, data: queuePage([next ? anonymousRow : namedRow], {
+      total: 2, counts: { all: 2, awaiting: 2, replied: 0 }, nextCursor: next ? null : cursor,
+    }) });
   });
   render(<FeedbackPage />);
   // When
@@ -377,8 +386,9 @@ test('retains a reply draft and its original expectedVersion through conflict an
   mockedAuth.mockReturnValue(adminAuth);
   let row = namedRow;
   const calls = stubFetch(url => url.includes('/actions')
-    ? Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 }) : feedbackResponse([row]));
+    ? Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 }) : feedbackResponse([row], url));
   render(<FeedbackPage />);
+  fireEvent.click(screen.getByRole('tab', { name: /^全部/ }));
   const input = await screen.findByPlaceholderText('請在此輸入官方回應內容...');
   // When
   fireEvent.change(input, { target: { value: 'Keep my reply draft' } });
@@ -398,7 +408,7 @@ test('retains a reply draft and its original expectedVersion through conflict an
 test('resolves an off-page feedback hash through the visibility-checked item endpoint', async () => {
   // Given
   window.history.replaceState(null, '', '/feedback#item-fb-2');
-  const calls = stubFetch(url => url.includes('/api/rights/items') ? Response.json({ ok: true, data: anonymousRow }) : feedbackResponse([namedRow]));
+  const calls = stubFetch(url => url.includes('/api/rights/items') ? Response.json({ ok: true, data: anonymousRow }) : feedbackResponse([namedRow], url));
   // When
   render(<FeedbackPage />);
   // Then
@@ -406,7 +416,7 @@ test('resolves an off-page feedback hash through the visibility-checked item end
   const request = calls.find(call => call.url.includes('/api/rights/items'));
   expect(new URL(request?.url ?? '', 'http://localhost').searchParams.get('kind')).toBe('feedback');
   expect(new URL(request?.url ?? '', 'http://localhost').searchParams.get('id')).toBe('fb-2');
-  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+  await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
 });
 
 test.each([studentAuth, adminAuth])('keeps public anonymous attribution redacted before deliberate admin reveal (%s)', async auth => {
@@ -437,7 +447,7 @@ test('recovers an off-page feedback conflict through targeted reload and explici
       remote = { ...remote, reply, version: remote.version + 1 };
       return actionSuccess({ id: remote.id, version: remote.version });
     }
-    return feedbackResponse([namedRow]);
+   return feedbackResponse([namedRow], url);
   });
   render(<FeedbackPage />);
   await screen.findByText('Original targeted reply');
@@ -460,7 +470,7 @@ test('recovers an off-page feedback conflict through targeted reload and explici
   expect(editor.getByRole('textbox')).toHaveValue('Latest targeted reply');
   fireEvent.change(editor.getByRole('textbox'), { target: { value: 'Merged targeted reply' } });
   fireEvent.click(editor.getByRole('button', { name: /發布官方回覆/ }));
-  expect(await editor.findByRole('status')).toHaveTextContent('操作已成功完成。');
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Hidden name.*操作已成功完成。/));
   expect(editor.getByRole('textbox')).toHaveValue('Merged targeted reply');
   expect(calls.filter(call => call.url.includes('/actions')).map(call => JSON.parse(String(call.init?.body)).payload.expectedVersion)).toEqual([1, 1, 2]);
   expect(calls.filter(call => call.url.includes('/items?'))).toHaveLength(3);
@@ -475,7 +485,7 @@ test.each(['deleted', 'forbidden'] as const)('clears a cached public feedback ta
     if (url.includes('/items?')) return visible ? Response.json({ ok: true, data: anonymousRow })
       : outcome === 'deleted' ? Response.json({ ok: true, data: null })
       : Response.json({ ok: false, code: 'FORBIDDEN' }, { status: 403 });
-    return feedbackResponse([namedRow]);
+    return feedbackResponse([namedRow], url);
   });
   render(<FeedbackPage />);
   await screen.findByText(anonymousRow.content);
@@ -500,7 +510,9 @@ test('rechecks a feedback hash when its list row moves off page without losing t
   const calls = stubFetch(url => {
     const target: FeedbackPublicDTO = moved ? { ...namedRow, reply: 'Moved latest reply', version: 2 } : namedRow;
     if (url.includes('/items?')) return Response.json({ ok: true, data: target });
-    return Response.json({ ok: true, data: { items: moved ? [anonymousRow] : [namedRow], nextCursor: moved ? cursor : null } });
+    return Response.json({ ok: true, data: queuePage(moved ? [anonymousRow] : [namedRow], {
+      total: moved ? 2 : 1, counts: { all: moved ? 2 : 1, awaiting: moved ? 2 : 1, replied: 0 }, nextCursor: moved ? cursor : null,
+    }) });
   });
   render(<FeedbackPage />);
   const input = await screen.findByRole('textbox', { name: /回覆「Fixture feedback」/ });
@@ -514,7 +526,7 @@ test('rechecks a feedback hash when its list row moves off page without losing t
   expect(screen.getByRole('textbox', { name: /回覆「Fixture feedback」/ })).toHaveValue('Draft before list movement');
   expect(screen.getByRole('button', { name: '捨棄草稿並使用最新內容' })).toBeVisible();
   expect(calls.filter(call => call.url.includes('/items?'))).toHaveLength(initialTargetReads + 1);
-  expect(calls.filter(call => call.url.includes('/feedback?'))).toHaveLength(2);
+  expect(calls.filter(call => call.url.includes('/queue?'))).toHaveLength(2);
 });
 
 test('returns an unavailable targeted refresh instead of claiming an unknown read succeeded', async () => {
@@ -523,7 +535,7 @@ test('returns an unavailable targeted refresh instead of claiming an unknown rea
   let unavailable = false;
   stubFetch(() => unavailable ? Response.json({ ok: false, code: 'UNAVAILABLE' }, { status: 503 })
     : Response.json({ ok: true, data: anonymousRow }));
-  const view = renderHook(() => usePublicItemLink('feedback', [], toFeedbackPublicDTO));
+  const view = renderHook(() => usePublicItemLink('feedback', [], { parse: toFeedbackPublicDTO }));
   await waitFor(() => expect(view.result.current.target?.id).toBe(anonymousRow.id));
   // When an explicit refresh cannot confirm current visibility or content.
   unavailable = true;
@@ -548,7 +560,7 @@ test.each(['identity', 'generation', 'hash', 'request'] as const)('discards targ
     if (!id) throw new TypeError('Missing public target ID');
     return Response.json({ ok: true, data: { ...anonymousRow, id, content: reads === 1 ? 'Initial public target' : 'Fresh public target' } });
   });
-  const view = renderHook(() => usePublicItemLink('feedback', [], toFeedbackPublicDTO));
+  const view = renderHook(() => usePublicItemLink('feedback', [], { parse: toFeedbackPublicDTO }));
   await waitFor(() => expect(view.result.current.target?.content).toBe('Initial public target'));
   const pending = view.result.current.refresh();
   // When a newer scope or request completes first.
@@ -581,7 +593,7 @@ test.each(['feedback', 'proposal'] as const)('recovers the %s draft and original
   mockedAuth.mockReturnValue(adminAuth);
   const target = kind === 'feedback' ? { ...anonymousRow, reply: 'Original public reply' } : {
     id: 'retry-proposal', title: 'Retry proposal', content: 'Public proposal body', author_name: 'Student',
-    status: '研議中', reply: 'Original public reply', version: 1, upvotes_count: 0,
+    status: '處理中', reply: 'Original public reply', version: 1, upvotes_count: 0,
     viewer_voted: false, legacy_upvotes_count: 0, created_at: '2026-01-01T00:00:00Z',
   };
   const path = kind === 'feedback' ? '/feedback' : '/proposals';
@@ -597,11 +609,14 @@ test.each(['feedback', 'proposal'] as const)('recovers the %s draft and original
       return Response.json({ ok: true, data: target });
     }
     if (pathname === '/api/rights/actions') return Response.json({ ok: false, code: 'CONFLICT' }, { status: 409 });
-    if (pathname === '/api/rights/feedback') return feedbackResponse([namedRow]);
-    if (pathname === '/api/rights/proposals/pending') return feedbackResponse([
-      { ...target, title: 'Private pending alternative', content: 'Private pending body', status: '待審核' },
-    ]);
-    if (pathname === '/api/rights/proposals' || pathname.endsWith('/comments')) return feedbackResponse([]);
+    if (pathname === '/api/rights/queue') {
+      const queueKind = new URL(url, 'http://localhost').searchParams.get('kind');
+      if (queueKind === 'feedback') return feedbackResponse([namedRow], url);
+      return Response.json({ ok: true, data: queueKind === 'pending'
+        ? pendingQueuePage([{ ...target, title: 'Private pending alternative', content: 'Private pending body', status: '待審核' }], url)
+        : proposalQueuePage([], url) });
+    }
+    if (pathname.endsWith('/comments')) return Response.json({ ok: true, data: { items: [], nextCursor: null } });
     throw new TypeError(`Unexpected recovery request: ${url}`);
   });
   render(kind === 'feedback' ? <FeedbackPage /> : <ProposalsPage />);
@@ -636,7 +651,7 @@ test.each(['feedback', 'proposal'] as const)('recovers the %s draft and original
     payload: { id: target.id, reply: 'Draft retained through retry', expectedVersion: 1 },
   } });
   expect(calls.filter(call => call.url.includes('/items?'))).toHaveLength(3);
-  expect(calls.filter(call => call.url.includes('/proposals/pending?'))).toHaveLength(kind === 'proposal' ? 1 : 0);
+  expect(calls.filter(call => new URL(call.url, 'http://localhost').searchParams.get('kind') === 'pending')).toHaveLength(kind === 'proposal' ? 1 : 0);
   expect(calls.some(call => /\/admin\/|\/authors/.test(call.url))).toBe(false);
   expect(window.location.hash).toBe(`#item-${target.id}`);
 });
@@ -644,7 +659,8 @@ test.each(['feedback', 'proposal'] as const)('recovers the %s draft and original
 test.each(['feedback', 'proposal'] as const)('omits the %s linked-item retry when the hash target is invalid', async kind => {
   // Given an invalid fragment and healthy public lists.
   window.history.replaceState(null, '', `/${kind === 'feedback' ? 'feedback' : 'proposals'}#item-`);
-  const calls = stubFetch(() => feedbackResponse([]));
+  const calls = stubFetch(url => Response.json({ ok: true, data: kind === 'feedback'
+    ? feedbackQueuePage([], url) : proposalQueuePage([], url) }));
   // When the public page validates its hash.
   render(kind === 'feedback' ? <FeedbackPage /> : <ProposalsPage />);
   // Then it explains the invalid link without an unusable retry or a targeted read.

@@ -9,7 +9,7 @@ test('security headers present on live responses while hydration and auth still 
   if (!fixtureURL || !baseURL) throw new TypeError('Harness URLs required');
 
   // Live HTTP header assertions against the real Playwright-owned Next server.
-  for (const path of ['/', '/proposals', '/feedback', '/admin', '/api/rights/session', '/api/rights/feedback']) {
+  for (const path of ['/', '/proposals', '/feedback', '/api/rights/session', '/api/rights/feedback']) {
     const response = await request.get(`${baseURL}${path}`);
     const headers = response.headers();
     expect(headers['x-frame-options'], path).toBe('DENY');

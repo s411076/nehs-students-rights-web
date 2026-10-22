@@ -82,8 +82,8 @@ test('similar name or email prefix never becomes my proposal', async () => {
   // Given a legacy session plus proposals by lookalike authors
   supabaseSpy.session = { user: { email: 'wang@nehs.hc.edu.tw', user_metadata: { full_name: '王小明' } } };
   supabaseSpy.proposals = [
-    { id: 'p1', title: '別人的相似提案', author_name: '王小明大', status: '研議中' },
-    { id: 'p2', title: '前綴相似提案', author_name: 'wang', status: '研議中' },
+    { id: 'p1', title: '別人的相似提案', author_name: '王小明大', status: '處理中' },
+    { id: 'p2', title: '前綴相似提案', author_name: 'wang', status: '處理中' },
   ];
   verified('王小明', 'wang@nehs.hc.edu.tw', 3);
   // When

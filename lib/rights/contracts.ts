@@ -7,7 +7,7 @@
 export const PROPOSAL_CATEGORIES = ['環境與設備', '學聯與活動', '課程與教學', '其他'] as const;
 export type ProposalCategory = (typeof PROPOSAL_CATEGORIES)[number];
 
-export const PUBLIC_STATUSES = ['研議中', '通過', '已採納', '不採納'] as const;
+export const PUBLIC_STATUSES = ['處理中', '已結案'] as const;
 export type PublicStatus = (typeof PUBLIC_STATUSES)[number];
 
 export const PENDING_STATUS = '待審核' as const;

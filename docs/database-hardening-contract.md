@@ -45,6 +45,8 @@ p_query filters title/content before pagination, maximum 100 Unicode code points
 | rights_is_admin | none; caller-only boolean |
 | rights_admin_author | p_kind ('proposal', 'feedback', 'comment'), p_id |
 
+`rights_list_admin_feedback` remains a database contract; no app route calls it after removal of the separate admin page/API.
+
 Existing DTO fields remain. All list DTOs add version:number. Proposal DTO also
 adds viewer_voted:boolean and legacy_upvotes_count:number. Counts are safe integer
 JSON numbers. Public feedback omits author_name for anonymous rows; public comments
@@ -55,9 +57,42 @@ attribution is known. Historical identifiers are not automatically trusted.
 
 HTTP list endpoints use the existing RightsResult envelope containing Page<T>.
 Endpoints: /api/rights/proposals, /feedback, /home-sections, /proposals/pending,
-/admin/feedback, /proposals/[id]/comments, /authors, /items (all under /api/rights).
+/proposals/[id]/comments, /authors, /items (all under /api/rights).
 List query parameters are limit, cursor (JSON), query; targeted reads use kind,id.
-Admin lists and author lookup require the server admin guard as well as DB checks.
+Pending proposal lists and author lookup require the server admin guard as well as DB checks.
+
+## Filtered queue contract
+
+`GET /api/rights/queue?kind=feedback|proposal|pending&filter=...&limit=20&cursor=...&query=...`
+is a separate queue API; the old Page<T> RPCs and their interfaces are untouched.
+Kind-specific filters only: feedback all|awaiting|replied, proposal
+all|processing|closed, pending pending. Unknown or repeated query keys are rejected.
+
+The queue envelope extends the old Page shape with required totals:
+
+    QueuePage<T> = { items: T[], nextCursor: { created_at: string, id: string } | null,
+                     total: number, counts: { all, awaiting, replied } | { all, processing, closed } | { pending } }
+
+`total` always equals `counts[filter]`. Counts cover every query-matched row
+before the selected filter/cursor/limit, computed in the same snapshot as the
+items, so totals stay accurate even when a page is empty. Counts are nonnegative
+safe integers, never optional or zero fallbacks. Awaiting means `reply = ''`;
+whitespace replies stay nonempty (replied) per the existing contract.
+Awaiting and pending queues sort oldest-first (created_at,id ASC); all other
+queues sort newest-first (DESC), preserving microsecond cursor precision.
+All filtered rows are reachable: the filter applies before keyset pagination,
+never as a post-filter over a limited page. The pending queue requires the
+strict admin actor check in the database as well as the server guard, and
+public proposal counts never include pending rows. SQL entrypoint
+`public.rights_queue_page` (definer, executor-owned, explicit anon +
+authenticated grants; private implementation has no JWT execute grant).
+
+TypeScript surface: `lib/rights/queues.ts` exposes QueueKind, QueueFilter,
+QueueCounts, QueuePage<T>, parseQueueParameters, parseQueuePage (item parser
+plus expected kind/filter), QueueParameters, queuePath and RIGHTS_QUEUE_PATH.
+Server reads go through `readRightsQueue` / `rightsQueueRoute`
+(`lib/rights/server-reads.ts`), reusing parsePage cursor validation, the
+generic rights RPC read path, guarded error mapping and the no-store envelope.
 
 ## Mutation contract
 
@@ -86,6 +121,14 @@ Receipts: create {inserted:true,id,version}; edit {id,version}; delete
 attribution in DB, enforces defaults and existing Unicode-safe title rules.
 Vote derives user from auth.uid(), serializes on proposal, is desired-state
 idempotent, and cannot reduce historical baseline. Old ledgers are not double-counted.
+
+Proposal status model: 待審核 (unpublished gate), 處理中 (all live undecided),
+已結案 (decided), plus internal invisible 被退回. updateProposalControl
+p_status accepts only 處理中 / 已結案; approveProposal lands 處理中 and
+rejectProposal lands 被退回. Public list/item reads filter 處理中 / 已結案
+only; pending reads filter 待審核. The decided outcome (採納 / 不採納 + 理由)
+lives in the official reply text as the documented 決議：採納／不採納＋理由
+convention (editor guidance/placeholder only, no hard DB validation).
 
 version is content_version for proposals/feedback, unaffected by votes/comments.
 Approve/reject require matching version AND pending status. Drafts retain their

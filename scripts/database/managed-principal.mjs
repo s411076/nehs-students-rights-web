@@ -3,15 +3,17 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { loadMigrationChain } from './migrations.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const source = 'database-recovery-parity-20261016';
 const container = `rights-managed-${Date.now()}-${process.pid}`;
 const image = 'supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00';
 const database = 'rights_test_managed';
-const migration = 'supabase/migrations/20261015183529_rights_hardening.sql';
 const file = (path) => readFileSync(resolve(root, path), 'utf8');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
+// Complete ordered chain from the shared manifest; never a hardcoded subset.
+const chain = loadMigrationChain(root, (absolute) => readFileSync(absolute, 'utf8'));
 
 function docker(args, input, stage = 'docker') {
   const result = spawnSync('docker', args, { input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -107,12 +109,18 @@ try {
   sql(container, database, file('tests/database/preservation.sql'));
   sql(container, database, `CREATE SCHEMA rights_principal_guard;
     CREATE FUNCTION rights_principal_guard.check_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN
-      IF current_user<>'postgres' OR session_user<>'postgres' OR (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+      -- Collapse replaces executor-owned private RPCs via transient
+      -- SET ROLE rights_executor; session_user must stay the managed
+      -- NOSUPERUSER postgres throughout.
+      IF session_user<>'postgres' OR (SELECT rolsuper FROM pg_roles WHERE rolname=session_user)
+        OR current_user NOT IN ('postgres','rights_executor') THEN
         RAISE EXCEPTION 'Migration left managed postgres principal';
       END IF;
     END $$;
     CREATE EVENT TRIGGER rights_principal_guard ON ddl_command_start EXECUTE FUNCTION rights_principal_guard.check_ddl();`);
-  sql(container, database, file(migration), 'postgres', 'managed migration');
+  for (const entry of chain) {
+    sql(container, database, entry.sql, 'postgres', `managed migration ${entry.file}`);
+  }
   sql(container, database, 'DROP EVENT TRIGGER rights_principal_guard; DROP SCHEMA rights_principal_guard CASCADE;', undefined, 'guard cleanup');
   sql(container, database, file('tests/database/preservation-check.sql'));
   const authAfter = hash(sql(container, database, authCatalog));
@@ -121,11 +129,12 @@ try {
   if (authBefore !== authAfter || countsBefore !== countsAfter || principalBefore !== principalAfter) throw new Error('Auth catalog, legacy counts or principal attributes changed');
   sql(container, database, file('tests/database/managed-principal.sql'), undefined, 'post-migration effective privileges');
   sql(container, database, `\\set VERBOSITY verbose\nBEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`, undefined, 'full SQL regression');
+  sql(container, database, file('tests/database/queues.sql'), undefined, 'filtered queue totals and gating');
   const sourcePrincipalAfter = hash(sql(source, 'recovery', principal));
   if (sourcePrincipalBefore !== sourcePrincipalAfter) throw new Error('Source postgres attributes changed');
   writeFileSync(resolve(root, 'tests/database/verification-managed.json'), `${JSON.stringify({
     command: 'node scripts/database/managed-principal.mjs', container, database, image,
-    migration, migrationSha256: hash(file(migration)), prerequisites: baseline,
+    migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })), prerequisites: baseline,
     authCatalogSha256: { before: authBefore, after: authAfter }, legacyCountsSha256: { before: countsBefore, after: countsAfter },
     principalSha256: { before: principalBefore, after: principalAfter, sourceBefore: sourcePrincipalBefore, sourceAfter: sourcePrincipalAfter },
     passed: ['fresh-cluster-no-executor', 'postgres-nosuperuser-ddl-guard', 'auth-policy-42501', 'managed-migration', 'auth-catalog-unchanged', 'legacy-counts-preserved', 'effective-privilege-cleanup', 'full-sql-regression'],

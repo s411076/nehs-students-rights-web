@@ -11,7 +11,7 @@ try {
   });
   assert.equal((await client.auth.getUser(fixtureSession().access_token)).data.user?.id, 'student');
   assert.equal((await client.auth.getUser('forged')).error?.status, 401);
-  assert.deepEqual((await client.from('proposals').select('id').eq('id', 'proposal-1').in('status', ['研議中']).limit(1)).data, [{ id: 'proposal-1' }]);
+  assert.deepEqual((await client.from('proposals').select('id').eq('id', 'proposal-1').in('status', ['處理中']).limit(1)).data, [{ id: 'proposal-1' }]);
   assert.equal((await client.from('feedback').update({ reply: 'Coverage student write' }).eq('id', 'feedback-1').select('id').single()).error, null);
   assert.equal((await client.from('home_sections').insert({ title: 'Coverage insert' }).select('id')).error, null);
   assert.equal((await client.from('feedback').delete().eq('id', 'feedback-1').select('id')).error, null);

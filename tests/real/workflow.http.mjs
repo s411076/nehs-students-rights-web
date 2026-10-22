@@ -109,7 +109,7 @@ try {
   const historical = randomUUID();
   execFileSync('docker', ['exec', '-i', state.db, 'psql', '-h', '/tmp', '-U', 'supabase_admin', '-d', 'fixture', '-X', '-v', 'ON_ERROR_STOP=1'], {
     input: `INSERT INTO public.proposals(id,title,content,status,legacy_upvotes_count,upvotes_count)
-      VALUES ('${historical}','${marker} historical','Synthetic history','通過',13,13);`, stdio: ['pipe', 'ignore', 'pipe'],
+      VALUES ('${historical}','${marker} historical','Synthetic history','處理中',13,13);`, stdio: ['pipe', 'ignore', 'pipe'],
   });
   cleanup.push({ kind: 'proposal', id: historical, version: 1 });
   for (const [actor, voted, total] of [['studentA', true, 14], ['studentA', true, 14],
@@ -135,11 +135,11 @@ try {
     assert.equal(item.legacy_upvotes_count, 13); assert.equal(item.upvotes_count, 13); assert.equal(item.version, 1);
   });
   await check('admin edit returns next version after votes and comments', async () => {
-    const receipt = await success('admin', 'update_proposal_control', { p_id: proposal, p_status: '通過', p_reply: 'Synthetic reply', p_expected_version: 2 });
+    const receipt = await success('admin', 'update_proposal_control', { p_id: proposal, p_status: '處理中', p_reply: 'Synthetic reply', p_expected_version: 2 });
     assert.deepEqual(receipt, { id: proposal, version: 3 }); cleanup.find(row => row.id === proposal).version = 3;
   });
   for (const [name, args, status, code] of [
-    ['update_proposal_control', { p_id: proposal, p_status: '通過', p_reply: 'Stale', p_expected_version: 2 }, 409, 'PT409'],
+    ['update_proposal_control', { p_id: proposal, p_status: '處理中', p_reply: 'Stale', p_expected_version: 2 }, 409, 'PT409'],
     ['approve_proposal', { p_id: proposal, p_expected_version: 3 }, 409, 'PT409'],
     ['create_proposal', { p_title: 'Synthetic invalid', p_content: 'Body', p_category: 'invalid' }, 400, 'PT400'],
     ['set_vote', { p_proposal_id: randomUUID(), p_voted: true }, 409, 'PT409'],

@@ -39,7 +39,7 @@ export function HomeSections() {
         <textarea id="home-section-content" required rows={3} value={content} disabled={mutation.busy} onChange={event => setContent(event.target.value)} placeholder="欄位內容與公告細節..."
           className={ui.field} />
         <div className="flex flex-wrap items-center gap-2">
-          <button type="submit" disabled={mutation.busy} className={ui.primaryButton}><Save aria-hidden="true" className="size-4 shrink-0" />{mutation.busy ? '發布中...' : '發布到首頁'}</button>
+          <button type="submit" disabled={mutation.busy || !mutation.canWrite} className={ui.primaryButton}><Save aria-hidden="true" className="size-4 shrink-0" />{mutation.busy ? '發布中...' : '發布到首頁'}</button>
           <button type="button" onClick={() => void sections.refresh()} disabled={mutation.busy || sections.status === 'loading'}
             className={ui.secondaryButton}>重新載入公告</button>
         </div>
@@ -54,7 +54,7 @@ export function HomeSections() {
       </div>}
       {sections.status === 'ready' && sections.items.length === 0 && <p className="text-sm text-gray-400 py-2">目前沒有首頁公告。</p>}
       {sections.items.map(section => <div key={section.id} className={`${ui.card} p-6 relative`}>
-        {isAdmin && <button type="button" disabled={mutation.busy} onClick={() => {
+        {isAdmin && <button type="button" disabled={mutation.busy || !mutation.canWrite} onClick={() => {
           if (!window.confirm('確定要刪除此首頁欄位嗎？')) return;
           void mutation.run({ action: 'deleteHomeSection', payload: { id: section.id, expectedVersion: section.version } }).then(result => {
             if (result?.ok) { sections.remove(section.id); mutation.setNotice('已刪除首頁欄位。'); }

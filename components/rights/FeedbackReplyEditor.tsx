@@ -21,7 +21,7 @@ type EditorProps = {
 
 export function FeedbackReplyEditor({ item, refresh, onDenied, presentation, actions }: EditorProps) {
   const draft = useVersionedDraft(item.reply, item.version, useFeedbackReplyDraft(item.id));
-  const mutation = useRightsMutation();
+  const mutation = useRightsMutation({ key: `reply:${item.id}`, label: `「${item.title || item.content.slice(0, 10)}」官方回覆` });
   const save = async () => {
     const reply = draft.value;
     if (item.reply.trim() && !reply.trim() && !window.confirm('確定要清除現有的官方回覆嗎？')) return;
@@ -61,7 +61,7 @@ export function FeedbackReplyEditor({ item, refresh, onDenied, presentation, act
       {field}
       <div className={presentation === 'panel' ? 'flex flex-wrap justify-end gap-3' : 'contents'}>
       {actions}
-      <button type="button" disabled={mutation.busy} onClick={() => void save()}
+      <button type="button" disabled={mutation.busy || !mutation.canWrite} onClick={() => void save()}
         className={ui.primaryButton}>
         {mutation.busy && presentation === 'inline' && <InlineSpinner />}
         <Save aria-hidden="true" className="size-4 shrink-0" />
@@ -69,7 +69,7 @@ export function FeedbackReplyEditor({ item, refresh, onDenied, presentation, act
       </button>
       </div>
     </div>
-    <ActionFeedback error={mutation.error} notice={mutation.notice} />
+    <ActionFeedback {...mutation.feedback} />
     <DraftReconciliation stale={draft.stale} reload={refresh} reset={draft.reset} busy={mutation.busy} />
   </div>;
 }

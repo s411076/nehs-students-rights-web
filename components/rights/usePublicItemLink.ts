@@ -17,8 +17,10 @@ type TargetRead<T> = { readonly current: () => boolean; readonly result: RightsR
 
 /** Hash targets never fall back to private admin lists. */
 export function usePublicItemLink<T extends { readonly id: string }>(
-  kind: 'proposal' | 'feedback', items: readonly T[], parser: (value: unknown) => T | null,
+  kind: 'proposal' | 'feedback', items: readonly T[],
+  source: { readonly parse: (value: unknown) => T | null; readonly ready?: boolean },
 ) {
+  const { parse: parser, ready = true } = source;
   const auth = useAuth();
   const hash = useSyncExternalStore(subscribe, browserHash, serverHash);
   const id = useMemo(() => hash.startsWith('#item-') ? validateId(hash.slice(6)) : null, [hash]);
@@ -28,8 +30,7 @@ export function usePublicItemLink<T extends { readonly id: string }>(
   const active = useRef(true);
   const sequence = useRef(0);
   const invalidate = useCallback(() => { sequence.current++; }, []);
-  const listedIndex = items.findIndex(item => hash === `#item-${item.id}`);
-  const listed = listedIndex !== -1;
+  const listed = items.some(item => hash === `#item-${item.id}`);
   const [linked, setLinked] = useState<{ readonly scope: string; readonly item: T | null; readonly message: string } | null>(null);
   const [wasListed, setWasListed] = useState(listed);
   const [dismissedScope, setDismissedScope] = useState<string | null>(null);
@@ -73,22 +74,22 @@ export function usePublicItemLink<T extends { readonly id: string }>(
   }, [load, receive, listed, dismissed, id, invalidate]);
   const target = linked?.scope === scope ? linked.item : null;
   const present = listed || (target !== null && hash === `#item-${target.id}`);
-  // Async list rows can move a fetched target without changing present.
-  const position = listed ? listedIndex : items.length;
-  const destination = useMemo(() => present ? { id: hash.slice(1), position } : null, [hash, present, position]);
+  const scrolled = useRef<string | null>(null);
+  useEffect(() => { if (scrolled.current !== hash) scrolled.current = null; }, [hash]);
   useEffect(() => {
-    if (!destination) return;
+    if (!ready || !present || scrolled.current === hash) return;
     const scroll = () => {
-      const element = document.getElementById(destination.id);
+      const element = document.getElementById(hash.slice(1));
       if (!element) return false;
       element.scrollIntoView({ block: 'start' });
+      scrolled.current = hash;
       return true;
     };
     let frame = requestAnimationFrame(() => {
       if (!scroll()) frame = requestAnimationFrame(scroll);
     });
     return () => cancelAnimationFrame(frame);
-  }, [destination]);
+  }, [hash, present, ready]);
   return {
     target: listed ? null : target,
     message: id && !id.ok ? '連結格式不正確。' : linked?.scope === scope ? linked.message : '',

@@ -9,6 +9,7 @@ import { HomeSearch } from '../../components/rights/HomeSearch';
 import { usePublicItemLink } from '../../components/rights/usePublicItemLink';
 import { toFeedbackPublicDTO } from '../../lib/rights/queries';
 import type { FeedbackPublicDTO, ProposalDTO } from '../../lib/rights/queries';
+import { queuePage } from '../fixtures/queue-pages';
 
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 
@@ -119,8 +120,11 @@ test.each([
   render(kind === 'feedback' ? <FeedbackPage /> : <ProposalsPage />);
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   // When item and list reads complete in either order, with a paint between them.
-  const finishList = () => list.resolve(Response.json({ ok: true, data: { items: firstPage,
-    nextCursor: offPage ? { created_at: target.created_at, id: 'recent-19' } : null } }));
+  const total = offPage ? 21 : 20;
+  const finishList = () => list.resolve(Response.json({ ok: true, data: queuePage(firstPage, {
+    total, counts: kind === 'feedback' ? { all: total, awaiting: total, replied: 0 } : { all: total, processing: total, closed: 0 },
+    nextCursor: offPage ? { created_at: target.created_at, id: 'recent-19' } : null,
+  }) }));
   const finishItem = () => item.resolve(Response.json({ ok: true, data: target }));
   await act(async () => { (itemFirst ? finishItem : finishList)(); });
   act(nextFrame);
@@ -132,15 +136,44 @@ test.each([
   expect(HTMLElement.prototype.scrollIntoView).toHaveBeenLastCalledWith({ block: 'start' });
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(card);
   expect(scrollPositions.at(-1)).toBe(offPage ? 20 : 19);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledOnce();
   const reads = fetcher.mock.calls.map(([input]) => new URL(String(input), 'http://localhost'));
   expect(reads.find(url => url.pathname === '/api/rights/items')?.searchParams.get('kind')).toBe(kind);
   expect(reads.some(url => url.searchParams.has('cursor'))).toBe(false);
 });
 
 function DelayedCard({ mounted }: { readonly mounted: boolean }) {
-  usePublicItemLink('feedback', [feedback], toFeedbackPublicDTO);
+  usePublicItemLink('feedback', [feedback], { parse: toFeedbackPublicDTO });
   return mounted ? <div id={`item-${feedback.id}`} /> : null;
 }
+
+function ChangingList({ items }: { readonly items: readonly FeedbackPublicDTO[] }) {
+  usePublicItemLink('feedback', items, { parse: toFeedbackPublicDTO });
+  return items.map(item => <div key={item.id} id={`item-${item.id}`} />);
+}
+
+test('does not repeat hash scrolling when pagination, refresh, or deletion changes list positions', () => {
+  window.history.replaceState(null, '', '/feedback#item-target-25');
+  const before = { ...feedback, id: 'before' };
+  const after = { ...feedback, id: 'after' };
+  const view = render(<ChangingList items={[before, feedback]} />);
+  act(nextFrame);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledOnce();
+  view.rerender(<ChangingList items={[before, feedback, after]} />);
+  act(nextFrame);
+  view.rerender(<ChangingList items={[after, before, feedback]} />);
+  act(nextFrame);
+  view.rerender(<ChangingList items={[feedback, after]} />);
+  act(nextFrame);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledOnce();
+  act(() => {
+    window.history.replaceState(null, '', '/feedback#item-after');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  act(nextFrame);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(document.getElementById('item-after'));
+});
 
 test('retries scrolling on the next frame when a present target card has not mounted yet', () => {
   // Given a present list target whose DOM card is not mounted at the first lookup.
@@ -173,7 +206,9 @@ test.each(['feedback', 'proposal'] as const)('keeps an unavailable %s target unr
   // Given a deleted or non-public target returned as null by the public endpoint.
   window.history.replaceState(null, '', `/${kind === 'feedback' ? 'feedback' : 'proposals'}#item-target-25`);
   vi.stubGlobal('fetch', async (input: string | URL | Request) => String(input).includes('/items?')
-    ? Response.json({ ok: true, data: null }) : pageResponse([]));
+    ? Response.json({ ok: true, data: null }) : Response.json({ ok: true, data: queuePage([], {
+      total: 0, counts: kind === 'feedback' ? { all: 0, awaiting: 0, replied: 0 } : { all: 0, processing: 0, closed: 0 },
+    }) }));
   // When the public page loads the fragment.
   render(kind === 'feedback' ? <FeedbackPage /> : <ProposalsPage />);
   // Then the existing visibility message remains, with no card or stray scroll.

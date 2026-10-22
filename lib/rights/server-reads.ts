@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/auth/server';
 import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { makeFailure, makeSuccess, type RightsResult } from './contracts';
 import { parsePage, parsePageParameters, type Page, type PageParameters } from './pagination';
+import { parseQueuePage, parseQueueParameters, type QueuePage, type QueueParameters } from './queues';
 import { isPublicStatus, toAuthorDTO, toCommentDTO, toFeedbackPublicDTO, toHomeSectionDTO, toProposalDTO } from './queries';
 import { rightsDatabaseFailure, rightsException, rightsResponse } from './server-actions';
 import { validateId } from './validation';
@@ -29,6 +30,46 @@ export async function readRightsPage<T>(client: SupabaseClient, read: RightsPage
   if (error) return rightsDatabaseFailure(error);
   const page = parsePage(data, read.parse);
   return page ? makeSuccess(page) : makeFailure('UNAVAILABLE');
+}
+
+export type RightsQueueRead<T> = {
+  readonly parameters: QueueParameters;
+  readonly parse: (data: unknown) => T | null;
+};
+
+export async function readRightsQueue<T>(client: SupabaseClient, read: RightsQueueRead<T>): Promise<RightsResult<QueuePage<T>>> {
+  const parameters = read.parameters;
+  if (parameters.p_kind === 'pending') await requireAdmin(client);
+  const { data, error } = await client.rpc('rights_queue_page', {
+    p_kind: parameters.p_kind, p_filter: parameters.p_filter,
+    p_limit: parameters.p_limit, p_cursor: parameters.p_cursor, p_query: parameters.p_query,
+  });
+  if (error) return rightsDatabaseFailure(error);
+  const page = parseQueuePage(data, read.parse, parameters.p_kind, parameters.p_filter);
+  return page ? makeSuccess(page) : makeFailure('UNAVAILABLE');
+}
+
+export async function rightsQueueRoute(request: NextRequest) {
+  let context: ReturnType<typeof createRouteHandlerClient> | undefined;
+  try {
+    context = createRouteHandlerClient(request);
+    const client = context.supabase;
+    const parsed = parseQueueParameters(new URL(request.url).searchParams);
+    if (!parsed.ok) return context.applyToResponse(rightsResponse(parsed));
+    const parameters = parsed.data;
+    const run = (): Promise<RightsResult<unknown>> => {
+      switch (parameters.p_kind) {
+        case 'feedback': return readRightsQueue(client, { parameters, parse: toFeedbackPublicDTO });
+        case 'proposal': return readRightsQueue(client, { parameters, parse: publicProposal });
+        case 'pending': return readRightsQueue(client, { parameters, parse: toProposalDTO });
+      }
+    };
+    return context.applyToResponse(rightsResponse(await run()));
+  } catch (error) {
+    const response = rightsResponse(rightsException(error));
+    try { return context ? context.applyToResponse(response) : response; }
+    catch { return rightsResponse(makeFailure('UNAVAILABLE')); }
+  }
 }
 
 type ReadSurface = 'proposals' | 'feedback' | 'home-sections' | 'pending' | 'comments' | 'authors' | 'items';

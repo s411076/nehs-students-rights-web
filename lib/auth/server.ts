@@ -1,12 +1,13 @@
 import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isAuthSessionMissingError } from '@supabase/supabase-js';
 import { createReadOnlyClient } from '@/lib/supabase/server';
 import { deriveDisplayName, isEligibleSchoolEmail, normalizeEmail } from './types';
 import type { SessionIdentity } from './types';
 
 export class AuthorizationError extends Error {
-  constructor(readonly status: 401 | 403 | 503, readonly code: 'unauthenticated' | 'ineligible_identity' | 'admin_required' | 'role_unavailable') {
+  constructor(readonly status: 401 | 403 | 503, readonly code: 'unauthenticated' | 'ineligible_identity' | 'admin_required' | 'role_unavailable' | 'auth_unavailable') {
     super(code);
     this.name = 'AuthorizationError';
   }
@@ -15,7 +16,12 @@ export class AuthorizationError extends Error {
 export async function getVerifiedIdentity(client?: SupabaseClient): Promise<Readonly<SessionIdentity>> {
   const supabase = client ?? await createReadOnlyClient();
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user || typeof data.user.id !== 'string' || !data.user.id) {
+  if (error) {
+    const rejected = isAuthSessionMissingError(error) || error.status === 401 || error.status === 403 ||
+      ['bad_jwt', 'session_not_found', 'refresh_token_not_found', 'refresh_token_already_used', 'user_not_found', 'user_banned'].some(code => code === error.code);
+    throw rejected ? new AuthorizationError(401, 'unauthenticated') : new AuthorizationError(503, 'auth_unavailable');
+  }
+  if (!data.user || typeof data.user.id !== 'string' || !data.user.id) {
     throw new AuthorizationError(401, 'unauthenticated');
   }
   const email = normalizeEmail(data.user.email);

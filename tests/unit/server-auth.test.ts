@@ -8,6 +8,7 @@ import { sessionRequest } from '../fixtures/server-auth-request';
 vi.mock('server-only', () => ({}));
 import { getVerifiedIdentity, requireAdmin } from '../../lib/auth/server';
 import { createRouteHandlerClient } from '../../lib/supabase/server';
+import { GET } from '../../app/api/rights/session/route';
 
 let fixture: Awaited<ReturnType<typeof startSupabaseFixture>>;
 beforeEach(async () => {
@@ -139,4 +140,28 @@ test('waits for provider verification when auth response is delayed', async () =
   expect(fixture.data.requests.filter(request => request.path.startsWith('/rest/'))).toEqual([]);
   release(Response.json({ message: 'revoked', code: 'bad_jwt' }, { status: 401 }));
   await expect(result).rejects.toMatchObject({ status: 401 });
+});
+
+test.each([503, 429, 400])('reports Auth service failure %s as unavailable rather than signing the user out', async status => {
+  const request = await sessionRequest(fixture.url, 'admin');
+  const original = globalThis.fetch;
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).endsWith('/auth/v1/user')
+    ? Promise.resolve(Response.json({ message: 'Synthetic service failure', code: 'unexpected_failure' }, { status }))
+    : original(input, init));
+  fixture.data.requests.length = 0;
+  const response = await GET(request);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: 'auth_unavailable' });
+  expect(fixture.data.requests.filter(request => request.path.startsWith('/rest/'))).toEqual([]);
+});
+
+test('keeps an explicit bad JWT a definitive rejection even when Auth returns HTTP 400', async () => {
+  const request = await sessionRequest(fixture.url, 'student');
+  const original = globalThis.fetch;
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).endsWith('/auth/v1/user')
+    ? Promise.resolve(Response.json({ message: 'Invalid token', code: 'bad_jwt' }, {
+      status: 400, headers: { 'X-Supabase-Api-Version': '2024-01-01' },
+    }))
+    : original(input, init));
+  expect((await GET(request)).status).toBe(401);
 });

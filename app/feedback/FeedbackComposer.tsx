@@ -51,7 +51,7 @@ export function FeedbackComposer({ refresh }: { readonly refresh: () => Promise<
             <input type="checkbox" checked={isAnonymous} onChange={event => setIsAnonymous(event.target.checked)} className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
             <span className="inline-flex items-center gap-1.5"><UserRoundMinus aria-hidden="true" className="size-4 shrink-0" /> 匿名發布（隱藏姓名）</span>
           </label>
-          <button type="submit" disabled={mutation.busy} className={ui.primaryButton}>{mutation.busy ? '發送中...' : '送出建言'}</button>
+          <button type="submit" disabled={mutation.busy || !mutation.canWrite} className={ui.primaryButton}>{mutation.busy ? '發送中...' : '送出建言'}</button>
         </div>
       </fieldset>
     </form>

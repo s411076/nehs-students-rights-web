@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import FeedbackPage from '../../app/feedback/page';
 import { useAuth } from '../../components/AuthProvider';
 import type { FeedbackPublicDTO } from '../../lib/rights/queries';
+import { feedbackQueuePage } from '../fixtures/queue-pages';
 
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 
@@ -13,7 +14,7 @@ const awaiting: FeedbackPublicDTO = {
 const replied: FeedbackPublicDTO = {
   ...awaiting, id: 'linked-replied', title: '已回覆連結目標', reply: '已提供官方回應', created_at: '2026-01-01T00:00:00Z',
 };
-const page = (items: readonly FeedbackPublicDTO[]) => Response.json({ ok: true, data: { items, nextCursor: null } });
+const page = (items: readonly FeedbackPublicDTO[], path: string) => Response.json({ ok: true, data: feedbackQueuePage(items, path) });
 const tab = (label: string) => screen.getByRole('tab', { name: new RegExp(`^${label}`) });
 const frames = new Map<number, FrameRequestCallback>();
 let frameId = 0;
@@ -35,33 +36,37 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-test.each([false, true])('renders and scrolls a replied hash outside the default awaiting tab (offPage=%s)', async offPage => {
+test.each([false, true])('renders and scrolls a replied hash outside the default awaiting tab (largeQueue=%s)', async largeQueue => {
   // Given a homepage-search fragment whose target does not match the admin's default queue.
   window.history.replaceState(null, '', '/feedback#item-linked-replied');
+  const population = largeQueue ? [awaiting, replied, ...Array.from({ length: 20 }, (_, index) => ({ ...awaiting,
+    id: `awaiting-${index}`, title: `其他待回覆 ${index}` }))] : [awaiting, replied];
   const fetcher = vi.fn(async (input: string | URL | Request) => String(input).includes('/items?')
-    ? Response.json({ ok: true, data: replied }) : page(offPage ? [awaiting] : [awaiting, replied]));
+    ? Response.json({ ok: true, data: replied }) : page(population, String(input)));
   vi.stubGlobal('fetch', fetcher);
   // When
   render(<FeedbackPage />);
-  await screen.findByRole('tab', { name: offPage ? /全部.*1/ : /全部.*2/ });
+  await screen.findByRole('tab', { name: largeQueue ? /全部.*22/ : /全部.*2/ });
   await screen.findByRole('heading', { name: replied.title });
   act(paint);
-  // Then the target remains a single real row, and counts describe loaded pages, not the exception.
+  // Then the target remains a single real row without inflating server counts.
   const target = document.getElementById(`item-${replied.id}`);
   expect(target).toBeVisible();
   expect(document.querySelectorAll(`#item-${replied.id}`)).toHaveLength(1);
   expect(tab('待回覆')).toHaveAttribute('aria-selected', 'true');
-  expect(within(tab('待回覆')).getByText('1')).toBeVisible();
-  expect(within(tab('已回覆')).getByText(offPage ? '0' : '1')).toBeVisible();
+  expect(within(tab('待回覆')).getByText(largeQueue ? '21' : '1')).toBeVisible();
+  expect(within(tab('已回覆')).getByText('1')).toBeVisible();
+  expect(screen.getByText(largeQueue ? '已載入 20／21 筆' : '已載入 1／1 筆')).toBeVisible();
   expect(HTMLElement.prototype.scrollIntoView).toHaveBeenLastCalledWith({ block: 'start' });
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(target);
   expect(screen.getByRole('tabpanel')).toHaveClass('[&>[id^=item-]]:scroll-mt-36', 'sm:[&>[id^=item-]]:scroll-mt-32');
   expect(fetcher.mock.calls.some(([input]) => String(input).includes('/admin/'))).toBe(false);
 });
 
-test('resolves an off-tab loaded row without an item read when the hash changes', async () => {
+test('resolves an off-tab row through the public item endpoint when the hash changes', async () => {
   // Given loaded pages with the replied row currently filtered out.
-  const fetcher = vi.fn().mockResolvedValue(page([awaiting, replied]));
+  const fetcher = vi.fn(async (input: string | URL | Request) => String(input).includes('/items?')
+    ? Response.json({ ok: true, data: replied }) : page([awaiting, replied], String(input)));
   vi.stubGlobal('fetch', fetcher);
   render(<FeedbackPage />);
   await screen.findByRole('tab', { name: /全部.*2/ });
@@ -71,50 +76,54 @@ test('resolves an off-tab loaded row without an item read when the hash changes'
     window.history.replaceState(null, '', '/feedback#item-linked-replied');
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
+  await screen.findByRole('heading', { name: replied.title });
   act(paint);
   // Then
   const target = document.getElementById(`item-${replied.id}`);
   expect(target).toBeVisible();
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(target);
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(2);
   expect(tab('待回覆')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('keeps the hash row and its draft without refetching when a different tab is selected', async () => {
+test('keeps the hash row and its draft when a different server-filtered tab is fetched', async () => {
   // Given a loaded awaiting hash target with an unsaved admin reply.
   window.history.replaceState(null, '', '/feedback#item-linked-awaiting');
   const fetcher = vi.fn(async (input: string | URL | Request) => String(input).includes('/items?')
-    ? Response.json({ ok: true, data: awaiting }) : page([awaiting, replied]));
+    ? Response.json({ ok: true, data: awaiting }) : page([awaiting, replied], String(input)));
   vi.stubGlobal('fetch', fetcher);
   render(<FeedbackPage />);
   await screen.findByRole('tab', { name: /全部.*2/ });
   act(paint);
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledOnce();
   fireEvent.change(screen.getByRole('textbox', { name: '回覆「待辦建言」' }), { target: { value: '尚未送出的草稿' } });
-  const reads = fetcher.mock.calls.length;
   // When
   fireEvent.click(tab('已回覆'));
+  await screen.findByRole('heading', { name: replied.title });
+  await screen.findByRole('textbox', { name: '回覆「待辦建言」' });
+  act(paint);
   // Then
   expect(tab('已回覆')).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('heading', { name: awaiting.title })).toBeVisible();
   expect(screen.getByRole('textbox', { name: '回覆「待辦建言」' })).toHaveValue('尚未送出的草稿');
-  expect(fetcher).toHaveBeenCalledTimes(reads);
+  expect(fetcher.mock.calls.filter(([input]) => String(input).includes('/queue?'))).toHaveLength(2);
   expect(window.location.hash).toBe('#item-linked-awaiting');
-  expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(document.getElementById(`item-${awaiting.id}`));
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledOnce();
 });
 
 test.each([
   { label: '全部', empty: '目前尚無意見回饋。' },
-  { label: '待回覆', empty: '都回完了' },
+  { label: '待回覆', empty: '目前沒有待回覆建言' },
   { label: '已回覆', empty: '尚無官方回覆' },
 ])('keeps the linked-message behavior when search navigation and $label both have no rows', async ({ label, empty }) => {
   // Given a zero-result search link whose public target is no longer available.
   window.history.replaceState(null, '', '/feedback?q=找不到#item-linked-replied');
   const fetcher = vi.fn(async (input: string | URL | Request) => String(input).includes('/items?')
-    ? Response.json({ ok: true, data: null }) : page([]));
+    ? Response.json({ ok: true, data: null }) : page([], String(input)));
   vi.stubGlobal('fetch', fetcher);
   render(<FeedbackPage />);
   await screen.findByRole('alert');
-  await screen.findByText('都回完了');
+  await screen.findByText('目前沒有待回覆建言');
   const reads = fetcher.mock.calls.length;
   // When
   fireEvent.click(tab(label));
@@ -122,8 +131,37 @@ test.each([
   // Then
   expect(screen.getByRole('alert')).toHaveTextContent('此項目未公開、已刪除或無法存取。');
   expect(screen.getByRole('button', { name: '重新載入連結項目' })).toBeVisible();
-  expect(within(screen.getByRole('tabpanel')).getByText(empty)).toBeVisible();
+  expect(await within(screen.getByRole('tabpanel')).findByText(empty)).toBeVisible();
   expect(document.getElementById(`item-${replied.id}`)).toBeNull();
   expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
-  expect(fetcher).toHaveBeenCalledTimes(reads);
+  expect(fetcher).toHaveBeenCalledTimes(reads + (label === '待回覆' ? 0 : 1));
+});
+
+test('refreshes server counts when an independently linked reply moves into the active awaiting queue', async () => {
+  // Given
+  window.history.replaceState(null, '', '/feedback#item-linked-replied');
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  let target = replied;
+  const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.includes('/actions')) {
+      target = { ...target, reply: '', version: 2 };
+      return Response.json({ ok: true, data: { id: target.id, version: 2 } });
+    }
+    return path.includes('/items?') ? Response.json({ ok: true, data: target }) : page([awaiting, target], path);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<FeedbackPage />);
+  const input = await screen.findByRole('textbox', { name: `回覆「${replied.title}」` });
+  await screen.findByText('已載入 1／1 筆');
+  const card = input.closest('[id^="item-"]');
+  if (!(card instanceof HTMLElement)) throw new TypeError('Missing linked reply card');
+  // When
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.click(within(card).getByRole('button', { name: '發布官方回覆' }));
+  // Then
+  expect(await screen.findByText('已載入 2／2 筆')).toBeVisible();
+  expect(within(tab('待回覆')).getByText('2')).toBeVisible();
+  expect(within(tab('已回覆')).getByText('0')).toBeVisible();
+  expect(fetcher.mock.calls.filter(([path]) => String(path).includes('/queue?'))).toHaveLength(2);
 });

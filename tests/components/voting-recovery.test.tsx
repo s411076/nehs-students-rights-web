@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ProposalsPage from '../../app/proposals/page';
 import type { AuthContextValue } from '../../components/AuthProvider';
 import { parseActionRequest } from '../../lib/rights/validation';
+import { proposalQueuePage, pendingQueuePage } from '../fixtures/queue-pages';
 
 const state = vi.hoisted((): { auth: AuthContextValue; count: number; voted: boolean } => ({
   auth: { status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false },
@@ -29,6 +30,8 @@ function installFetch(mutate: () => Promise<Response> | Response) {
     const url = new URL(String(input), 'http://localhost');
     if (init?.method === 'POST') return mutate();
     if (url.pathname === '/api/rights/items') return Response.json({ ok: true, data: rows().find(row => row.id === url.searchParams.get('id')) });
+    if (url.pathname === '/api/rights/queue') return Response.json({ ok: true, data: url.searchParams.get('kind') === 'pending'
+      ? pendingQueuePage([], String(input)) : proposalQueuePage(rows(), String(input)) });
     return Response.json({ ok: true, data: { items: url.pathname.endsWith('/comments') ? [] : rows(), nextCursor: null } });
   });
   vi.stubGlobal('fetch', fetcher);
@@ -170,6 +173,8 @@ test('recovers an off-page proposal conflict through targeted reload and explici
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     if (url.pathname === '/api/rights/items') return Response.json({ ok: true, data: remote });
+    if (url.pathname === '/api/rights/queue') return Response.json({ ok: true, data: url.searchParams.get('kind') === 'pending'
+      ? pendingQueuePage([], String(input)) : proposalQueuePage(rows(), String(input)) });
     if (init?.method === 'POST') {
       const request = parseActionRequest(JSON.parse(String(init.body)));
       if (!request.ok || request.data.action !== 'updateProposalControl') throw new TypeError('Unexpected recovery action');
@@ -206,7 +211,7 @@ test('recovers an off-page proposal conflict through targeted reload and explici
   expect(editor.getByRole('combobox')).toHaveValue('處理中');
   fireEvent.change(editor.getByRole('textbox', { name: /官方回覆/ }), { target: { value: 'Merged proposal reply' } });
   fireEvent.click(editor.getByRole('button', { name: /儲存修改/ }));
-  expect(await editor.findByRole('status')).toHaveTextContent('操作已成功完成。');
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Targeted proposal.*操作已成功完成。/));
   expect(requests).toEqual([
     { action: 'updateProposalControl', payload: { id: remote.id, status: '已結案', reply: 'Unmerged proposal draft', expectedVersion: 1 } },
     { action: 'updateProposalControl', payload: { id: remote.id, status: '已結案', reply: 'Unmerged proposal draft', expectedVersion: 1 } },

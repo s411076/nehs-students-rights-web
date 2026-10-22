@@ -16,18 +16,18 @@ type CardProps = { readonly item: ProposalDTO; readonly refresh: () => Promise<u
 
 export function ProposalCard({ item, refresh, remove }: CardProps) {
   const auth = useAuth();
-  const mutation = useRightsMutation();
-  return <div id={`item-${item.id}`} className={`${ui.card} scroll-mt-20 p-5 space-y-4 relative`}>
-    <ActionFeedback error={mutation.error} notice={mutation.notice} />
+  const mutation = useRightsMutation({ key: `delete-proposal:${item.id}`, label: `刪除「${item.title}」提案` });
+  return <div id={`item-${item.id}`} data-rights-row className={`${ui.card} scroll-mt-20 p-5 space-y-4 relative`}>
+    <ActionFeedback {...mutation.feedback} />
     <div className={`flex flex-wrap items-center justify-between gap-2 pb-2 border-b ${ui.border}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className={ui.badge}>{item.status}</span>
         <span className="text-xs text-gray-500 dark:text-neutral-400">{new Date(item.created_at).toLocaleDateString()}</span>
       </div>
-      {auth.isAdmin && <button type="button" disabled={mutation.busy} onClick={() => {
+      {auth.isAdmin && <button type="button" disabled={mutation.busy || !mutation.canWrite} onClick={() => {
         if (!window.confirm('確定要刪除這條提案嗎？刪除後將無法復原！')) return;
-        void mutation.run({ action: 'deleteProposal', payload: { id: item.id, expectedVersion: item.version } })
-          .then(result => { if (result?.ok) remove(item.id); });
+        void mutation.run({ action: 'deleteProposal', payload: { id: item.id, expectedVersion: item.version } },
+          undefined, () => remove(item.id));
       }} className={ui.dangerButton}><Trash2 aria-hidden="true" className="size-4 shrink-0" /> 刪除</button>}
     </div>
     <div>

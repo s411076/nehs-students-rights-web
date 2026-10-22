@@ -48,7 +48,7 @@ export function ProposalComposer({ refresh }: { readonly refresh: () => Promise<
             className={ui.field} />
         </div>
         <div className="flex items-center justify-end pt-2">
-          <button type="submit" className={ui.primaryButton}>
+          <button type="submit" disabled={!mutation.canWrite} className={ui.primaryButton}>
             {mutation.busy ? '發送中...' : '送出提案'}
           </button>
         </div>

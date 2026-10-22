@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ProposalsPage from '../../app/proposals/page';
 import { useAuth } from '../../components/AuthProvider';
 import type { AuthContextValue } from '../../components/AuthProvider';
 import type { ProposalDTO } from '../../lib/rights/queries';
-import type { PageCursor } from '../../lib/rights/pagination';
+import { pendingQueuePage, proposalQueuePage } from '../fixtures/queue-pages';
 
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 
@@ -25,14 +25,17 @@ const rows: readonly ProposalDTO[] = [
   { ...base, id: 'closed-old', title: '較舊已結案提案', status: '已結案', created_at: '2026-02-02T00:00:00Z' },
   { ...base, id: 'processing-old', title: '較舊處理中提案', status: '處理中', created_at: '2026-02-01T00:00:00Z' },
 ];
-const page = (items: readonly ProposalDTO[], nextCursor: PageCursor | null = null) =>
-  Response.json({ ok: true, data: { items, nextCursor } });
+const page = (items: readonly ProposalDTO[], path?: string) => Response.json({ ok: true, data: proposalQueuePage(items, path) });
 const tab = (label: string) => screen.getByRole('tab', { name: new RegExp(`^${label}`) });
 const titles = () => within(screen.getByRole('tabpanel')).queryAllByRole('heading', { level: 3 }).map(node => node.textContent);
 function list(items = rows) {
-  const publicRead = vi.fn().mockResolvedValue(page(items));
-  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) =>
-    new URL(String(input), 'http://localhost').pathname === '/api/rights/proposals' ? publicRead(input) : page([])));
+  const publicRead = vi.fn(async (input: string | URL | Request) => page(items, String(input)));
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname.endsWith('/comments')) return Response.json({ ok: true, data: { items: [], nextCursor: null } });
+    return url.searchParams.get('kind') === 'pending'
+      ? Response.json({ ok: true, data: pendingQueuePage([], String(input)) }) : publicRead(input);
+  }));
   return publicRead;
 }
 
@@ -63,7 +66,7 @@ test.each([
   { label: '全部', expected: ['最新處理中提案', '最新已結案提案', '處理中提案', '已結案提案', '較舊已結案提案', '較舊處理中提案'] },
   { label: '處理中', expected: ['最新處理中提案', '處理中提案', '較舊處理中提案'] },
   { label: '已結案', expected: ['最新已結案提案', '已結案提案', '較舊已結案提案'] },
-])('filters $label in newest-first order without a list refetch when selected', async ({ label, expected }) => {
+])('fetches $label in globally newest-first server order when selected', async ({ label, expected }) => {
   // Given loaded public statuses, plus private states that must stay excluded.
   const publicRead = list([...rows,
     { ...base, id: 'pending', title: '未公開待審核', status: '待審核', created_at: '2026-02-07T00:00:00Z' },
@@ -74,8 +77,8 @@ test.each([
   // When
   fireEvent.click(tab(label));
   // Then
-  expect(titles()).toEqual(expected);
-  expect(publicRead).toHaveBeenCalledOnce();
+  await waitFor(() => expect(titles()).toEqual(expected));
+  expect(publicRead).toHaveBeenCalledTimes(label === '全部' ? 1 : 2);
   expect(within(tab('全部')).getByText('6')).toBeVisible();
   expect(screen.queryByText('未公開待審核')).toBeNull();
   expect(screen.queryByText('未公開退回')).toBeNull();
@@ -105,7 +108,7 @@ test.each([
   expect(tab(from)).toHaveAttribute('tabindex', '-1');
   expect(screen.getByRole('tabpanel')).toHaveAttribute('id', tab(to).getAttribute('aria-controls'));
   expect(screen.getByRole('tablist')).toHaveClass('sticky', 'top-16', 'z-20', 'bg-background', 'border-b');
-  expect(publicRead).toHaveBeenCalledOnce();
+  await waitFor(() => expect(publicRead).toHaveBeenCalledTimes(from === '全部' ? 2 : 3));
 });
 
 test('replaces skeleton counts in stable slots when the first page arrives', async () => {
@@ -134,7 +137,7 @@ test.each([
   { label: '全部', message: '目前尚無公開提案。' },
   { label: '處理中', message: '目前尚無處理中的提案。' },
   { label: '已結案', message: '目前尚無已結案的提案。' },
-])('shows the $label empty state when its loaded filter has no rows', async ({ label, message }) => {
+])('shows the $label empty state when the server filter total is zero', async ({ label, message }) => {
   // Given
   list([]);
   render(<ProposalsPage />);
@@ -142,29 +145,31 @@ test.each([
   // When
   fireEvent.click(tab(label));
   // Then
-  expect(within(screen.getByRole('tabpanel')).getByText(message)).toBeVisible();
+  expect(await within(screen.getByRole('tabpanel')).findByText(message)).toBeVisible();
   expect(titles()).toEqual([]);
 });
 
-test('continues an empty active filter and updates loaded counts when the next page arrives', async () => {
-  // Given a first page without any closed proposal.
-  const cursor = { created_at: '2026-02-06T00:00:00Z', id: 'processing-new' };
-  const publicRead = list();
-  publicRead.mockReset().mockResolvedValueOnce(page(rows.slice(0, 1), cursor)).mockResolvedValueOnce(page(rows.slice(1)));
+test('loads one closed batch at a time while retaining exact population counts', async () => {
+  // Given
+  const population: readonly ProposalDTO[] = Array.from({ length: 45 }, (_, index) => ({ ...base, status: '已結案',
+    id: `closed-${index}`, title: `結案提案 ${index}`, created_at: new Date(Date.UTC(2026, 0, index + 1)).toISOString() }));
+  const publicRead = list(population);
   render(<ProposalsPage />);
-  await screen.findByRole('tab', { name: /全部.*1/ });
+  await screen.findByRole('tab', { name: /全部.*45/ });
   fireEvent.click(tab('已結案'));
-  expect(screen.getByText('目前尚無已結案的提案。')).toBeVisible();
+  await screen.findByText('已載入 20／45 筆');
+  const cursor = proposalQueuePage(population, '/api/rights/queue?kind=proposal&filter=closed').nextCursor;
   // When
   fireEvent.click(screen.getByRole('button', { name: '載入更多公開提案' }));
   // Then
-  await screen.findByRole('heading', { name: '最新已結案提案' });
-  expect(titles()).toEqual(['最新已結案提案', '已結案提案', '較舊已結案提案']);
+  await screen.findByText('已載入 40／45 筆');
+  expect(titles()).toEqual([...population].reverse().slice(0, 40).map(item => item.title));
   expect(tab('已結案')).toHaveAttribute('aria-selected', 'true');
-  expect(within(tab('全部')).getByText('6')).toBeVisible();
-  expect(within(tab('已結案')).getByText('3')).toBeVisible();
-  expect(publicRead).toHaveBeenCalledTimes(2);
-  const request = new URL(String(publicRead.mock.calls[1]?.[0]), 'http://localhost');
+  expect(within(tab('全部')).getByText('45')).toBeVisible();
+  expect(within(tab('已結案')).getByText('45')).toBeVisible();
+  expect(publicRead).toHaveBeenCalledTimes(3);
+  const request = new URL(String(publicRead.mock.calls[2]?.[0]), 'http://localhost');
   expect(JSON.parse(request.searchParams.get('cursor') ?? 'null')).toEqual(cursor);
-  expect(screen.queryByRole('button', { name: '載入更多公開提案' })).toBeNull();
+  expect(request.searchParams.get('filter')).toBe('closed');
+  expect(screen.getByRole('button', { name: '載入更多公開提案' })).toBeEnabled();
 });

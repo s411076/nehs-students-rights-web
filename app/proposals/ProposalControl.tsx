@@ -12,7 +12,7 @@ import { ui } from '@/components/rights/ui';
 
 export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO; readonly refresh: () => Promise<unknown> }) {
   const draft = useVersionedDraft({ status: item.status, reply: item.reply }, item.version, useProposalControlDraft(item.id));
-  const mutation = useRightsMutation();
+  const mutation = useRightsMutation({ key: `control:${item.id}`, label: `「${item.title}」狀態與官方回覆` });
   const isClosed = draft.value.status === '已結案';
   const save = async () => {
     const value = draft.value;
@@ -23,7 +23,7 @@ export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO;
   };
   return <div className={`${ui.card} p-4 space-y-3 mt-3`}>
     <div className="text-sm font-bold text-gray-800 dark:text-neutral-200 flex items-center gap-1.5"><ShieldCheck aria-hidden="true" className="size-4 shrink-0" /> 管理員控制台（修改狀態與官方回覆）：</div>
-    <ActionFeedback error={mutation.error} notice={mutation.notice} />
+    <ActionFeedback {...mutation.feedback} />
     <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
       <div className="space-y-1">
         <label htmlFor={`proposal-status-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-neutral-300">提案狀態<span className="sr-only">：{item.title}</span></label>
@@ -40,7 +40,7 @@ export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO;
           onChange={event => draft.edit({ ...draft.value, reply: event.target.value })} placeholder={isClosed ? '決議：採納／不採納＋理由，例如：決議：採納，圖書館延長開放時間…' : '輸入官方回覆內容...'}
           className={ui.field} />
       </div>
-      <button type="button" onClick={() => void save()} disabled={mutation.busy}
+      <button type="button" onClick={() => void save()} disabled={mutation.busy || !mutation.canWrite}
         className={ui.primaryButton}>
         <Save aria-hidden="true" className="size-4 shrink-0" />{mutation.busy ? '儲存中...' : '儲存修改'}
       </button>

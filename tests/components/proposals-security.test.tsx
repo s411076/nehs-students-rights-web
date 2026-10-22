@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ProposalsPage from '../../app/proposals/page';
 import type { AuthContextValue } from '../../components/AuthProvider';
+import { pendingQueuePage, proposalQueuePage, queuePage } from '../fixtures/queue-pages';
 
 const state = vi.hoisted(() => {
   const anonymous = (): AuthContextValue => ({ status: 'anonymous', identity: null, user: null, generation: 0, isLoggedIn: false, isAdmin: false });
@@ -37,18 +38,19 @@ vi.mock('../../lib/rights/client', () => ({
   readRights: async (path: string, parse: (value: unknown) => unknown) => {
     try {
       let data: unknown;
-      if (path.startsWith('/api/rights/proposals/pending')) {
+      const url = new URL(path, 'http://localhost');
+      if (url.pathname === '/api/rights/queue' && url.searchParams.get('kind') === 'pending') {
         const result = await state.reads(path, parse);
         if (!result.ok) return result;
-        data = Array.isArray(result.data) ? { items: result.data, nextCursor: null } : result.data;
+        data = Array.isArray(result.data) ? pendingQueuePage(result.data, path) : result.data;
       } else if (path.includes('/comments')) {
         data = await state.commentRead(path);
       } else if (path.startsWith('/api/rights/items')) {
         data = await state.itemRead(path);
       } else {
         const result = await state.publicRead(path);
-        if (result.error || !Array.isArray(result.data)) return { ok: false, code: 'UNAVAILABLE' };
-        data = { items: result.data, nextCursor: result.nextCursor ?? null };
+        if (result.error) return { ok: false, code: 'UNAVAILABLE' };
+        data = Array.isArray(result.data) ? proposalQueuePage(result.data, path) : result.data;
       }
       const parsed = parse(data);
       return parsed === null ? { ok: false, code: 'UNAVAILABLE' } : { ok: true, data: parsed };
@@ -129,6 +131,7 @@ test.each([true, false])('preserves the anonymous comment option (%s) through th
   // Given
   verified(); render(<ProposalsPage />);
   const input = await screen.findByPlaceholderText('寫下您的看法與建議...');
+  await screen.findByText('Existing comment');
   // When
   fireEvent.change(input, { target: { value: '  Comment draft  ' } });
   if (anonymous) fireEvent.click(screen.getByRole('checkbox'));
@@ -178,7 +181,7 @@ test.each([
   // When
   fireEvent.click(screen.getByRole('button', { name: button }));
   // Then
-   await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action, payload }, action.startsWith('delete') ? undefined : expect.any(Function)));
+   await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action, payload }, action === 'deleteProposal' ? undefined : expect.any(Function)));
 });
 
 test.each([true, false])('requires confirmation before clearing an existing official reply (%s)', async confirmed => {
@@ -233,7 +236,7 @@ test('excludes private states and uses only per-proposal public comment endpoint
     expect(screen.queryByText(/hidden/)).toBeNull();
      expect(state.select).not.toHaveBeenCalled();
      expect(state.filter).not.toHaveBeenCalled();
-     expect(state.publicRead).toHaveBeenCalledWith(expect.stringContaining('/api/rights/proposals?limit=20'));
+      expect(state.publicRead).toHaveBeenCalledWith(expect.stringContaining('/api/rights/queue?kind=proposal&filter=all&limit=20'));
   } finally { if (publicRow) state.publicRows.splice(0, state.publicRows.length, publicRow); }
 });
 
@@ -395,12 +398,13 @@ test('pages public and pending proposals independently while keeping previously 
   // Given
   verified(true);
   const cursor = { created_at: '2026-10-14T00:00:00.123456Z', id: 'p1' };
-  state.publicRead.mockImplementation(async (path: string) => ({ data: path.includes('cursor=')
-    ? [{ ...state.publicRows[0], id: 'p2', title: 'Older public' }] : state.publicRows, error: null,
-  nextCursor: path.includes('cursor=') ? null : cursor }));
-  state.reads.mockImplementation(async (path: string) => ({ ok: true, data: { items: [{ ...state.publicRows[0],
-    id: path.includes('cursor=') ? 'pending-2' : 'pending', title: path.includes('cursor=') ? 'Older pending' : 'Private pending', status: '待審核' }],
-  nextCursor: path.includes('cursor=') ? null : cursor } }));
+  state.publicRead.mockImplementation(async (path: string) => ({ data: queuePage(path.includes('cursor=')
+    ? [{ ...state.publicRows[0], id: 'p2', title: 'Older public' }] : state.publicRows, {
+      total: 2, counts: { all: 2, processing: 2, closed: 0 }, nextCursor: path.includes('cursor=') ? null : cursor,
+    }), error: null }));
+  state.reads.mockImplementation(async (path: string) => ({ ok: true, data: queuePage([{ ...state.publicRows[0],
+     id: path.includes('cursor=') ? 'pending-2' : 'pending', title: path.includes('cursor=') ? 'Older pending' : 'Private pending', status: '待審核' }],
+    { total: 2, counts: { pending: 2 }, nextCursor: path.includes('cursor=') ? null : cursor }) }));
   render(<ProposalsPage />);
   // When
   fireEvent.click(await screen.findByRole('button', { name: '載入更多公開提案' }));
@@ -457,7 +461,8 @@ test('retains control draft baseVersion when newer proposal content is reloaded'
 
 test('fails closed on an unknown public status instead of querying its comments', async () => {
   // Given
-  state.publicRead.mockResolvedValue({ data: [{ ...state.publicRows[0], status: 'unknown', title: 'Hidden unknown' }], error: null });
+  state.publicRead.mockResolvedValue({ data: queuePage([{ ...state.publicRows[0], status: 'unknown', title: 'Hidden unknown' }],
+    { total: 1, counts: { all: 1, processing: 1, closed: 0 } }), error: null });
   // When
   render(<ProposalsPage />);
   // Then
@@ -487,10 +492,11 @@ test('retains proposal control and anonymous comment drafts when a newer insert 
   const first = Array.from({ length: 19 }, (_, index) => ({ ...target, id: `first-${index}`, title: `First ${index}` }));
   let moved = false;
   const cursor = { created_at: '2026-10-14T00:00:00.123456Z', id: 'first-18' };
-  state.publicRead.mockImplementation(async (path: string) => ({ data: path.includes('cursor=')
+  state.publicRead.mockImplementation(async (path: string) => ({ data: queuePage(path.includes('cursor=')
     ? [{ ...target, version: 2, status: '處理中', reply: 'New server control' }]
     : moved ? [{ ...target, id: 'new', title: 'New inserted proposal' }, ...first] : [...first, target],
-  nextCursor: moved && !path.includes('cursor=') ? cursor : null, error: null }));
+    { total: moved ? 21 : 20, counts: { all: moved ? 21 : 20, processing: moved ? 21 : 20, closed: 0 },
+      nextCursor: moved && !path.includes('cursor=') ? cursor : null }), error: null }));
   state.commentRead.mockResolvedValue({ items: [], nextCursor: null });
   state.requests.mockResolvedValue({ ok: false, code: 'CONFLICT', message: 'Conflict' });
   render(<ProposalsPage />);

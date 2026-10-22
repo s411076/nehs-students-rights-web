@@ -33,6 +33,7 @@ export function useTheme() {
     const next = theme === 'dark' ? 'light' : 'dark';
     stopFollowingSystem.current?.();
     stopFollowingSystem.current = null;
+    document.documentElement.dataset.themePreference = next;
     document.documentElement.classList.toggle('dark', next === 'dark');
     setTheme(next);
     try {

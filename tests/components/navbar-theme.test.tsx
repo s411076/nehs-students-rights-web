@@ -18,6 +18,7 @@ let system: ReturnType<typeof mockSystemTheme>;
 beforeEach(() => {
   localStorage.removeItem(storageKey);
   document.documentElement.classList.remove('dark');
+  delete document.documentElement.dataset.themePreference;
   system = mockSystemTheme();
 });
 afterEach(() => {
@@ -27,6 +28,7 @@ afterEach(() => {
   localStorage.removeItem(storageKey);
   localStorage.removeItem('unrelated-preference');
   document.documentElement.classList.remove('dark', 'unrelated');
+  delete document.documentElement.dataset.themePreference;
 });
 
 test.each([false, true])('follows the OS on first visit when system dark is %s', async systemDark => {
@@ -141,6 +143,22 @@ test('keeps the explicit session theme when persistence is blocked', async () =>
   // Then
   expect(document.documentElement).toHaveClass('dark');
   expect(screen.getByRole('button', { name: '深色模式' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test.each(['QuotaExceededError', 'SecurityError'])('keeps the document preference through a component remount when storage throws %s', async errorName => {
+  localStorage.setItem(storageKey, 'light');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Unavailable', errorName); });
+  if (errorName === 'SecurityError') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Blocked', errorName); });
+  const view = render(<Navbar key="before" />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: '深色模式' }));
+  expect(document.documentElement).toHaveClass('dark');
+  view.rerender(<Navbar key="after" />);
+  await act(async () => {});
+  expect(document.documentElement).toHaveClass('dark');
+  expect(screen.getByRole('button', { name: '深色模式' })).toHaveAttribute('aria-pressed', 'true');
+  act(() => { system.change(true); system.change(false); });
+  expect(document.documentElement).toHaveClass('dark');
 });
 
 test('hydrates deterministic server markup before exposing the effective dark state', async () => {

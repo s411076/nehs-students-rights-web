@@ -8,12 +8,15 @@ export function initializeTheme(storageKey: string, mediaQuery: string): {
   readonly theme: Theme;
   readonly preference: Theme | null;
 } {
-  let preference: Theme | null = null;
-  try {
-    const stored = window.localStorage.getItem(storageKey);
-    if (stored === 'light' || stored === 'dark') preference = stored;
-  } catch (error) {
-    if (!(error instanceof DOMException && error.name === 'SecurityError')) throw error;
+  const memory = document.documentElement.dataset.themePreference;
+  let preference: Theme | null = memory === 'light' || memory === 'dark' ? memory : null;
+  if (preference === null) {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored === 'light' || stored === 'dark') preference = stored;
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'SecurityError')) throw error;
+    }
   }
   const theme = preference ?? (window.matchMedia(mediaQuery).matches ? 'dark' : 'light');
   document.documentElement.classList.toggle('dark', theme === 'dark');

@@ -4,6 +4,7 @@ import ProposalsPage from '../../app/proposals/page';
 import { PendingProposal } from '../../app/proposals/PendingProposal';
 import { useAuth } from '../../components/AuthProvider';
 import type { ProposalDTO } from '../../lib/rights/queries';
+import { pendingQueuePage, proposalQueuePage } from '../fixtures/queue-pages';
 
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 
@@ -12,7 +13,6 @@ const item: ProposalDTO = {
   reply: '', created_at: '2026-02-02T00:00:00Z', version: 7,
   upvotes_count: 17, viewer_voted: false, legacy_upvotes_count: 0,
 };
-const page = (items: readonly ProposalDTO[]) => Response.json({ ok: true, data: { items, nextCursor: null } });
 const disclosure = () => screen.getByRole('button', { name: `提案詳情：${item.title}` });
 
 beforeEach(() => {
@@ -30,11 +30,12 @@ test('shows a compact summary without fetching author data when a pending row mo
   // When
   render(<PendingProposal item={item} refresh={vi.fn()} />);
   // Then
-  const link = screen.getByRole('link', { name: new RegExp(item.title) });
-  expect(link).toHaveAttribute('href', '#item-pending-1');
-  expect(screen.getByRole('heading', { name: item.title })).toHaveClass('truncate');
-  expect(link).toHaveTextContent('待審核');
-  expect(link).toHaveTextContent(`${new Date(item.created_at).toLocaleDateString()} · 17 票`);
+  const summary = screen.getByRole('button', { name: /^待審核/ });
+  expect(summary).toHaveAttribute('aria-controls', disclosure().getAttribute('aria-controls'));
+  expect(summary).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByText(item.title)).toHaveClass('truncate');
+  expect(summary).toHaveTextContent('待審核');
+  expect(summary).toHaveTextContent(`${new Date(item.created_at).toLocaleDateString()} · 17 票`);
   expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByText(/完整待審核內容/)).not.toBeVisible();
   expect(screen.queryByRole('button', { name: '查看作者（僅管理員）' })).toBeNull();
@@ -106,15 +107,21 @@ test('does not reject or navigate when the existing confirmation is declined', (
   expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('navigates to the public card anchor without moderation when the row summary is tapped', async () => {
+test.each([false, true])('toggles detail without navigation or moderation when the summary is tapped with expanded=%s', expanded => {
   // Given
   const fetcher = vi.fn();
   vi.stubGlobal('fetch', fetcher);
   render(<PendingProposal item={item} refresh={vi.fn()} />);
+  if (expanded) fireEvent.click(disclosure());
+  const summary = screen.getByRole('button', { name: /^待審核/ });
   // When
-  fireEvent.click(screen.getByRole('link', { name: new RegExp(item.title) }));
+  fireEvent.click(summary);
   // Then
-  await waitFor(() => expect(window.location.hash).toBe('#item-pending-1'));
+  expect(summary).toHaveAttribute('aria-expanded', String(!expanded));
+  expect(disclosure()).toHaveAttribute('aria-expanded', String(!expanded));
+  if (expanded) expect(screen.getByText(/完整待審核內容/)).not.toBeVisible();
+  else expect(screen.getByText(/完整待審核內容/)).toBeVisible();
+  expect(window.location.hash).toBe('');
   expect(fetcher).not.toHaveBeenCalled();
   expect(window.confirm).not.toHaveBeenCalled();
 });
@@ -189,22 +196,30 @@ test('retains explicitly revealed attribution when detail is collapsed and reope
   expect(String(fetcher.mock.calls[0]?.[0])).toBe('/api/rights/authors?kind=proposal&id=pending-1');
 });
 
-test('orders the loaded pending queue oldest-first without mixing public statuses into its count', async () => {
-  // Given newest-first loaded pending pages with a no-longer-pending item.
+test('opens the globally oldest pending batch immediately from more than fifty queued proposals', async () => {
+  // Given
   const old = { ...item, id: 'old', title: '最早待審核提案', created_at: '2026-01-01T00:00:00Z' };
-  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) =>
-    String(input).includes('/pending?') ? page([item, old, { ...item, id: 'public', status: '處理中' }]) : page([])));
+  const population = [old, ...Array.from({ length: 60 }, (_, index) => ({ ...item, id: `pending-${index}`,
+    title: `待審核提案 ${index}`, created_at: new Date(Date.UTC(2026, 1, index + 1)).toISOString() }))];
+  const fetcher = vi.fn(async (input: string | URL | Request) => Response.json({ ok: true, data:
+    new URL(String(input), 'http://localhost').searchParams.get('kind') === 'pending'
+      ? pendingQueuePage(population, String(input)) : proposalQueuePage([], String(input)) }));
+  vi.stubGlobal('fetch', fetcher);
   // When
   render(<ProposalsPage />);
-  await screen.findByRole('link', { name: new RegExp(old.title) });
+  await screen.findByRole('button', { name: new RegExp(`^待審核.*${old.title}`) });
   // Then
-  expect(screen.getAllByRole('link').map(node => node.getAttribute('href'))).toEqual(['#item-old', '#item-pending-1']);
-  expect(screen.getByRole('heading', { name: /待審核提案區/ })).toHaveTextContent('已載入 2 筆');
+  expect(screen.getAllByRole('button', { name: /^待審核/ }).map(node => node.getAttribute('aria-controls')))
+    .toEqual(['pending-detail-old', ...population.slice(1, 20).map(row => `pending-detail-${row.id}`)]);
+  expect(screen.getByRole('heading', { name: /待審核提案區/ })).toHaveTextContent('已載入 20／61 筆');
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
 test('shows the pending empty state after a successful zero-row read', async () => {
   // Given
-  vi.stubGlobal('fetch', vi.fn(async () => page([])));
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => Response.json({ ok: true, data:
+    new URL(String(input), 'http://localhost').searchParams.get('kind') === 'pending'
+      ? pendingQueuePage([], String(input)) : proposalQueuePage([], String(input)) })));
   // When
   render(<ProposalsPage />);
   // Then

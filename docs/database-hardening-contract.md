@@ -61,6 +61,39 @@ Endpoints: /api/rights/proposals, /feedback, /home-sections, /proposals/pending,
 List query parameters are limit, cursor (JSON), query; targeted reads use kind,id.
 Pending proposal lists and author lookup require the server admin guard as well as DB checks.
 
+## Filtered queue contract
+
+`GET /api/rights/queue?kind=feedback|proposal|pending&filter=...&limit=20&cursor=...&query=...`
+is a separate queue API; the old Page<T> RPCs and their interfaces are untouched.
+Kind-specific filters only: feedback all|awaiting|replied, proposal
+all|processing|closed, pending pending. Unknown or repeated query keys are rejected.
+
+The queue envelope extends the old Page shape with required totals:
+
+    QueuePage<T> = { items: T[], nextCursor: { created_at: string, id: string } | null,
+                     total: number, counts: { all, awaiting, replied } | { all, processing, closed } | { pending } }
+
+`total` always equals `counts[filter]`. Counts cover every query-matched row
+before the selected filter/cursor/limit, computed in the same snapshot as the
+items, so totals stay accurate even when a page is empty. Counts are nonnegative
+safe integers, never optional or zero fallbacks. Awaiting means `reply = ''`;
+whitespace replies stay nonempty (replied) per the existing contract.
+Awaiting and pending queues sort oldest-first (created_at,id ASC); all other
+queues sort newest-first (DESC), preserving microsecond cursor precision.
+All filtered rows are reachable: the filter applies before keyset pagination,
+never as a post-filter over a limited page. The pending queue requires the
+strict admin actor check in the database as well as the server guard, and
+public proposal counts never include pending rows. SQL entrypoint
+`public.rights_queue_page` (definer, executor-owned, explicit anon +
+authenticated grants; private implementation has no JWT execute grant).
+
+TypeScript surface: `lib/rights/queues.ts` exposes QueueKind, QueueFilter,
+QueueCounts, QueuePage<T>, parseQueueParameters, parseQueuePage (item parser
+plus expected kind/filter), QueueParameters, queuePath and RIGHTS_QUEUE_PATH.
+Server reads go through `readRightsQueue` / `rightsQueueRoute`
+(`lib/rights/server-reads.ts`), reusing parsePage cursor validation, the
+generic rights RPC read path, guarded error mapping and the no-store envelope.
+
 ## Mutation contract
 
 Retain the 13-action union, replacing setVoteCount with setVote. No unsafe legacy

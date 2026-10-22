@@ -76,7 +76,9 @@ npm run test:e2e
 
 **公開讀取只給有界 RPC 分頁，匿名不給名字。**所有列表都經有界 `Page<T>` RPC 讀取（`lib/rights/server-reads.ts`，預設 `p_limit=20`、上限 50），不再直接掃表，公開提案另加 `PUBLIC_STATUSES` 過濾；公開意見回饋的匿名列在序列化前省略 `author_name`，管理員列表同樣維持遮蔽。要識別匿名作者須走伺服器管理 gate 之後的專用 `rights_admin_author` 查詢，只有可靠歸屬的新列才回 `known`，未知的歷史擁有權維持未知。個人頁完全不查提案（`app/profile/page.tsx`），個人提案列表維持刻意不提供。
 
-**本機強化尚未上線。**上述資料庫強化只在本機實作、尚未 commit，也尚未進入正式環境。本機驗證與正式發布是不同門檻，驗證證據及發布條件見 `docs/database-hardening.md`，契約見 `docs/database-hardening-contract.md`。`docs/security-source-remediation.md` 只描述先前的 source-only 工作。
+**本分支必須協調發布資料庫與網站。**先前 hardening 的發布紀錄見 `docs/database-hardening.md §7`；本次任務不部署新的狀態收斂或篩選佇列 migration。全新測試資料庫執行 `scripts/database/migrations.mjs` 的有序鏈，既有環境則核對 migration history 後只套缺少的版本。先保存編輯草稿、維護停寫並等待進行中操作完成，再套用缺少的 migration 與配對網站，通過 smoke 後才重開寫入。回滾限制見 `docs/database-hardening.md §5a`，契約見 `docs/database-hardening-contract.md`。
+
+**分頁數字代表全部符合條件的資料，不是已載入筆數。**`/api/rights/queue` 先篩選再分頁，回傳各分頁的真正總數；待回覆建言與待審核提案從最舊開始，其他清單從最新開始。每批載入 20 筆（API 上限 50），可持續載入更多，沒有總筆數上限。計數失敗顯示未知，不會誤報為 0。
 
 **投票以伺服器狀態為準，不自動重試。**`app/proposals/ProposalVote.tsx` 的每提案 single-flight 配合資料庫序列化與唯一票紀錄。畫面依收據及公開狀態查詢顯示票數與本人投票狀態，不把 localStorage 當權威。不確定結果顯示「無法確認是否已儲存，請先更新清單確認，勿重複提交。」後只查詢核對，不自動重送寫入。OAuth 保留瀏覽器 SDK 的 PKCE 交換及後續 `getUser` 驗證；基礎 headers 維持在 `next.config.ts`。
 

@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { loadMigrationChain } from './migrations.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const container = 'database-recovery-parity-20261016';
@@ -41,14 +41,18 @@ if (!clone) {
   sql(db, file('tests/database/legacy-seed.sql'));
 }
 sql(db, file('tests/database/preservation.sql'));
-for (const migration of readdirSync(resolve(root, 'supabase/migrations')).filter((name) => name.endsWith('_rights_hardening.sql')).sort()) {
-  sql(db, file(`supabase/migrations/${migration}`));
+// Complete ordered chain from the shared manifest; never a single-file subset.
+const chain = loadMigrationChain(root, (absolute) => readFileSync(absolute, 'utf8'));
+for (const entry of chain) {
+  sql(db, entry.sql);
 }
 sql(db, file('tests/database/preservation-check.sql'));
 console.log('PASS: migration application and complete legacy row preservation');
 // Restored data is never read into this process: SQL tests see synthetic rows only.
 sql(db, `BEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`);
 console.log('PASS: synthetic authorization, projection, pagination, version, audit and null-boundary tests');
+sql(db, file('tests/database/queues.sql'));
+console.log('PASS: filtered queue totals, ordering, leakage and pending gates');
 
 function concurrent(input, onReady) {
   return new Promise((resolvePromise, reject) => {
@@ -87,8 +91,7 @@ console.log('PASS: all local database gates; retained disposable DB for parent H
 writeFileSync(resolve(root, `tests/database/verification-${clone ? 'restored' : 'synthetic'}.json`), `${JSON.stringify({
   command: `node scripts/database/regression.mjs${clone ? ' --restored' : ''}`,
   container, database: db, template: clone ? 'recovery' : 'template0',
-  migration: '20261015183529_rights_hardening.sql',
-  migrationSha256: createHash('sha256').update(file('supabase/migrations/20261015183529_rights_hardening.sql')).digest('hex'),
+  migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
   passed: ['legacy-preservation', 'migration-application', 'authorization', 'projection', 'pagination', 'unicode-null-type-boundaries', 'versions-audit', 'multi-connection-votes'],
   completedAt: new Date().toISOString(),
   productionConnection: false, recoveredRowsOutput: false,

@@ -5,6 +5,9 @@ import type { SessionIdentity } from '@/lib/auth/types';
 import { createClient } from '@/lib/supabase';
 import { consumeOAuthResultParams, hasOAuthResultParams, resolveOAuthCompletion } from '@/lib/auth/oauth-completion';
 import type { CompletionResult } from '@/lib/auth/oauth-completion';
+import { VerificationContext } from './VerificationContext';
+import type { VerificationState } from './VerificationContext';
+import { VerificationBanner } from './VerificationBanner';
 
 type OAuthReturn = {
   readonly intended: boolean;
@@ -85,9 +88,12 @@ function sameIdentity(
   right: Readonly<SessionIdentity> | null,
 ): boolean {
   if (left === null || right === null) return left === null && right === null;
-  return left.id === right.id && left.email === right.email &&
-    left.displayName === right.displayName && left.isAdmin === right.isAdmin;
+  return left.id === right.id && left.email === right.email && left.isAdmin === right.isAdmin;
 }
+
+type SessionCheck =
+  | { readonly status: 'verified'; readonly identity: Readonly<SessionIdentity> }
+  | { readonly status: 'anonymous' | 'ineligible' | 'unavailable'; readonly identity: null };
 
 export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [oauthReturn] = useState(captureOAuthReturn);
@@ -97,6 +103,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const logoutBlocked = useRef(false);
   const pendingLogout = useRef(false);
   const invalidateLogout = useRef(() => {});
+  const retryVerification = useRef(() => {});
+  const [verification, setVerification] = useState<VerificationState>({ status: 'checking', epoch: 0 });
+  const verificationRef = useRef(verification);
+  const retry = useCallback(() => { retryVerification.current(); }, []);
+  const isCurrent = useCallback((epoch: number) => !logoutBlocked.current &&
+    verificationRef.current.status === 'ready' && verificationRef.current.epoch === epoch, []);
   const beginLogout = useCallback(() => {
     logoutBlocked.current = true;
     pendingLogout.current = true;
@@ -111,105 +123,108 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     let active = true;
     let generation = 0;
+    let sequence = 0;
     let controller = new AbortController();
-    const current = (version: number) => active && version === generation;
     let committedIdentity: Readonly<SessionIdentity> | null = null;
-    let committedStatus: AuthState['status'] = 'loading';
     const commit = (next: AuthState) => {
       committedIdentity = next.identity;
-      committedStatus = next.status;
       setState(next);
+    };
+    const readiness = (status: VerificationState['status']) => {
+      const next = { status, epoch: sequence };
+      verificationRef.current = next;
+      setVerification(next);
     };
     const invalidate = (status: 'loading' | 'anonymous') => {
       controller.abort();
-      controller = new AbortController();
+      sequence++;
       generation++;
       commit({ status, identity: null, generation });
-      return generation;
+      readiness('ready');
     };
     invalidateLogout.current = () => { invalidate('anonymous'); };
-    const verify = async (version: number) => {
-      if (!current(version)) return;
+    const verify = async (request: { readonly sequence: number; readonly generation: number; readonly controller: AbortController }) => {
+      const current = () => active && request.sequence === sequence && request.generation === generation && !logoutBlocked.current;
+      if (!current()) return;
+      let next: SessionCheck;
       try {
         const response = await fetch('/api/rights/session', {
           credentials: 'same-origin', cache: 'no-store',
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+          signal: AbortSignal.any([request.controller.signal, AbortSignal.timeout(15_000)]),
         });
-        let next: AuthState;
         switch (response.status) {
-          case 200: next = { status: 'verified', identity: parseIdentity(await response.json()), generation: version }; break;
-          case 401: next = { status: 'anonymous', identity: null, generation: version }; break;
-          case 403: next = { status: 'ineligible', identity: null, generation: version }; break;
-          default: next = { status: 'unavailable', identity: null, generation: version };
-        }
-        if (current(version)) {
-          commit(next);
-          if (next.status === 'verified') setLogoutError(null);
+          case 200: next = { status: 'verified', identity: parseIdentity(await response.json()) }; break;
+          case 401: next = { status: 'anonymous', identity: null }; break;
+          case 403: next = { status: 'ineligible', identity: null }; break;
+          default: next = { status: 'unavailable', identity: null };
         }
       } catch (error) {
-        if (current(version)) commit({ status: 'unavailable', identity: null, generation: version });
+        if (!(error instanceof Error || error instanceof DOMException)) throw error;
+        next = { status: 'unavailable', identity: null };
+      }
+      if (!current()) return;
+      switch (next.status) {
+        case 'unavailable':
+          if (committedIdentity === null) commit({ ...next, generation });
+          readiness('unavailable');
+          return;
+        case 'verified':
+          if (committedIdentity !== null && !sameIdentity(committedIdentity, next.identity)) generation++;
+          commit({ ...next, generation });
+          readiness('ready');
+          setLogoutError(null);
+          return;
+        case 'anonymous':
+        case 'ineligible':
+          if (committedIdentity !== null) generation++;
+          commit({ ...next, generation });
+          readiness('ready');
+          return;
+        default: return assertNever(next);
       }
     };
-    let unsubscribe = () => {};
-    const applyVerifiedResponse = async (version: number): Promise<AuthState | null> => {
-      const response = await fetch('/api/rights/session', {
-        credentials: 'same-origin', cache: 'no-store',
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
-      });
-      switch (response.status) {
-        case 200: return { status: 'verified', identity: parseIdentity(await response.json()), generation: version };
-        case 401: return { status: 'anonymous', identity: null, generation: version };
-        case 403: return { status: 'ineligible', identity: null, generation: version };
-        default: return { status: 'unavailable', identity: null, generation: version };
-      }
-    };
-    const refreshWithoutRemount = async (baseline: number) => {
-      // Tab refocus fires TOKEN_REFRESHED with the same identity; re-verify in the
-      // background and only bump generation when the identity actually changed.
-      let next: AuthState;
-      try {
-        const resolved = await applyVerifiedResponse(baseline);
-        if (resolved === null || !current(baseline)) return;
-        next = resolved;
-      } catch (error) {
-        // The network/JSON boundary fails closed, including SDK/storage restrictions.
-        if (!current(baseline)) return;
-        next = { status: 'unavailable', identity: null, generation: baseline };
-      }
-      if (!current(baseline)) return;
-      if (next.status === committedStatus && sameIdentity(next.identity, committedIdentity)) return;
+    const startCheck = (deferred: boolean) => {
+      if (!active || logoutBlocked.current) return;
       controller.abort();
       controller = new AbortController();
-      generation = baseline + 1;
-      commit({ ...next, generation });
-      if (next.status === 'verified') setLogoutError(null);
+      const request = { sequence: ++sequence, generation, controller };
+      readiness('checking');
+      if (deferred) queueMicrotask(() => { void verify(request); });
+      else void verify(request);
     };
+    retryVerification.current = () => { startCheck(false); };
+    let unsubscribe = () => {};
     try {
-      const { data } = createClient().auth.onAuthStateChange((event) => {
+      const { data } = createClient().auth.onAuthStateChange((event, session) => {
         if (!active || event === 'INITIAL_SESSION') return;
         // Logout holds identity closed; only a later explicit sign-in can recover.
         if (logoutBlocked.current && event !== 'SIGNED_OUT') {
           if (pendingLogout.current || event !== 'SIGNED_IN') return;
           logoutBlocked.current = false;
         }
-        if (event === 'SIGNED_OUT' || event === 'SIGNED_IN') {
-          const version = invalidate(event === 'SIGNED_OUT' ? 'anonymous' : 'loading');
-          if (event !== 'SIGNED_OUT') queueMicrotask(() => { void verify(version); });
+        if (event === 'SIGNED_OUT') {
+          logoutBlocked.current = true;
+          invalidate('anonymous');
           return;
         }
-        queueMicrotask(() => { void refreshWithoutRemount(generation); });
+        if ((event === 'SIGNED_IN' && committedIdentity === null) ||
+          (committedIdentity && session?.user.id && session.user.id !== committedIdentity.id)) invalidate('loading');
+        startCheck(true);
       });
       unsubscribe = () => data.subscription.unsubscribe();
-      void verify(generation);
+      startCheck(false);
     } catch (error) {
-      // Client initialization is a boundary: unavailable never retains privilege.
-      setState({ status: 'unavailable', identity: null, generation });
+      if (!(error instanceof Error || error instanceof DOMException)) throw error;
+      commit({ status: 'unavailable', identity: null, generation });
+      readiness('unavailable');
     }
     return () => {
       active = false;
       generation++;
+      sequence++;
       controller.abort();
       invalidateLogout.current = () => {};
+      retryVerification.current = () => {};
       unsubscribe();
     };
   }, []);
@@ -220,7 +235,13 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   };
   return <LogoutNoticeContext.Provider value={{ logoutError, logoutPending, beginLogout, reportLogoutFailure }}>
     <OAuthReturnContext.Provider value={oauthReturn}>
-      <Context.Provider value={value}><Fragment key={state.generation}>{children}</Fragment></Context.Provider>
+      <Context.Provider value={value}>
+        <VerificationContext.Provider value={{ ...verification, canWrite: verification.status === 'ready', retry, isCurrent }}>
+          <VerificationBanner hasIdentity={state.identity !== null} />
+          <Fragment key={state.generation}>{children}</Fragment>
+        </VerificationContext.Provider>
+      </Context.Provider>
     </OAuthReturnContext.Provider>
   </LogoutNoticeContext.Provider>;
 }
+function assertNever(value: never): never { throw new TypeError(`Unknown session state: ${value}`); }

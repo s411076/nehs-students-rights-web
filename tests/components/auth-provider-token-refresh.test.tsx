@@ -1,9 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { AuthProvider, useAuth } from '../../components/AuthProvider';
 import { fixtureSession } from '../fixtures/supabase-server';
+import { deferredResponse } from '../fixtures/operation-lifecycle';
 
 vi.mock('server-only', () => ({}));
 const sdk = vi.hoisted(() => ({
@@ -80,4 +81,46 @@ test('TOKEN_REFRESHED with changed identity still invalidates', async () => {
   await waitFor(() => expect(readAuth().generation).toBeGreaterThan(generation));
   expect(readAuth()).toMatchObject({ status: 'verified', identity: admin });
   expect(mounts).toBe(2);
+});
+
+test('ignores an older 503 after a newer unchanged 200 has verified the session', async () => {
+  // Given two independent background checks for the same verified owner.
+  const older = deferredResponse();
+  const newer = deferredResponse();
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json(student))
+    .mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise);
+  vi.stubGlobal('fetch', fetcher);
+  render(<AuthProvider><Consumer /></AuthProvider>);
+  await waitFor(() => expect(readAuth().status).toBe('verified'));
+  const generation: unknown = readAuth().generation;
+  await act(async () => sdk.listener?.('TOKEN_REFRESHED', null));
+  await act(async () => sdk.listener?.('TOKEN_REFRESHED', null));
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  // When the newer success arrives first, followed by the older failure.
+  await act(async () => newer.resolve(Response.json(student)));
+  await act(async () => older.resolve(Response.json({}, { status: 503 })));
+  // Then the older failure cannot revoke the newer verification or retire its owner.
+  expect(readAuth()).toMatchObject({ status: 'verified', identity: student, generation });
+});
+
+test.each(['TOKEN_REFRESHED', 'SIGNED_IN'] as const)('%s preserves mounted draft and generation when a background check fails', async event => {
+  // Given a locally edited draft owned by a verified student.
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json(student))
+    .mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  vi.stubGlobal('fetch', fetcher);
+  function Draft() {
+    const [value, setValue] = useState('');
+    return <input aria-label="Mounted draft" value={value} onChange={change => setValue(change.target.value)} />;
+  }
+  render(<AuthProvider><Consumer /><Draft /></AuthProvider>);
+  await waitFor(() => expect(readAuth().status).toBe('verified'));
+  const generation: unknown = readAuth().generation;
+  const field = screen.getByRole('textbox');
+  fireEvent.change(field, { target: { value: 'Keep my draft' } });
+  // When refocus reconfirms the same SDK user but the server is temporarily unavailable.
+  await act(async () => sdk.listener?.(event, { ...fixtureSession('student'), token_type: 'bearer' }));
+  // Then presentation identity and the exact mounted draft survive without fresh write authority.
+  expect(readAuth()).toMatchObject({ status: 'verified', identity: student, generation });
+  expect(screen.getByRole('textbox')).toBe(field);
+  expect(field).toHaveValue('Keep my draft');
 });

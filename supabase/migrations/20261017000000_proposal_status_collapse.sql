@@ -12,6 +12,17 @@ BEGIN;
 SET LOCAL lock_timeout = '10s';
 SET LOCAL search_path = '';
 
+-- Managed-principal execution: same transient pattern as the hardening
+-- cutover. PG17 gives a CREATEROLE creator ADMIN only, not SET/INHERIT, so
+-- construction needs this grant. It is revoked before commit (never the
+-- reverse). No permanent grant, no BYPASSRLS change, no owner change.
+DO $$
+BEGIN
+  IF NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user) THEN
+    EXECUTE pg_catalog.format('GRANT rights_executor TO %I WITH SET TRUE, INHERIT TRUE',current_user);
+  END IF;
+END $$;
+
 -- Backfill existing rows per the locked mapping. 待審核 / 被退回 / legacy
 -- values are left untouched.
 UPDATE public.proposals SET status =
@@ -32,6 +43,10 @@ BEGIN
   END IF;
 END $$;
 
+-- Private RPCs live in rights_private (owner rights_executor, no CREATE for
+-- postgres). Replace them as the owner via SET ROLE so no transient schema
+-- grant is needed and ownership cannot drift to postgres.
+SET ROLE rights_executor;
 -- Public-list filter: proposal + per-proposal comment gating move to the
 -- 2-status public set. Pending ('待審核') is unchanged.
 CREATE OR REPLACE FUNCTION rights_private.page(p_kind text,p_limit integer,p_cursor jsonb,p_query text DEFAULT '',p_proposal_id uuid DEFAULT NULL) RETURNS jsonb
@@ -165,9 +180,13 @@ BEGIN
   END IF;
   RETURN pg_catalog.jsonb_build_object('id',ident,'version',result_row->'content_version');
 END $$;
+RESET ROLE;
 
 -- Targeted public read: only the 2-status public set is visible. Pending,
 -- rejected, and legacy-invalid rows return null (hidden, not changed).
+-- Public schema CREATE belongs to postgres (DB owner); the transient
+-- executor membership above authorizes replacing this executor-owned
+-- function without a permanent schema grant.
 CREATE OR REPLACE FUNCTION public.rights_get_public_item(p_kind text,p_id uuid) RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 DECLARE j jsonb;
 BEGIN
@@ -179,5 +198,36 @@ BEGIN
   RETURN rights_private.project(p_kind,j);
 END $$;
 
+-- Ownership must not drift to the migration principal. Re-asserting is
+-- idempotent when the SET ROLE path above already preserved it.
+ALTER FUNCTION rights_private.page(text,integer,jsonb,text,uuid) OWNER TO rights_executor;
+ALTER FUNCTION rights_private.mutate(text,jsonb) OWNER TO rights_executor;
+ALTER FUNCTION public.rights_get_public_item(text,uuid) OWNER TO rights_executor;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE p.oid IN ('rights_private.page(text,integer,jsonb,text,uuid)'::regprocedure,
+      'rights_private.mutate(text,jsonb)'::regprocedure,
+      'public.rights_get_public_item(text,uuid)'::regprocedure)
+    AND p.proowner<>'rights_executor'::regrole) THEN
+    RAISE EXCEPTION 'status collapse: function owner drifted';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE oid='rights_private.user_identity(uuid)'::regprocedure
+    AND proowner<>'postgres'::regrole) THEN
+    RAISE EXCEPTION 'status collapse: identity owner drifted';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rights_executor'
+    AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'status collapse: executor gained superuser or bypassrls';
+  END IF;
+END $$;
+
+-- Remove only our own transient membership; PG17's bootstrap ADMIN-only row stays.
+DO $$
+BEGIN
+  IF NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user) THEN
+    EXECUTE pg_catalog.format('REVOKE rights_executor FROM %I GRANTED BY %I',current_user,current_user);
+  END IF;
+END $$;
 NOTIFY pgrst, 'reload schema';
 COMMIT;

@@ -62,7 +62,7 @@ if (command === 'up') {
   sql(state.db, `INSERT INTO public.admins(email) VALUES ('${users.admin.email}');
     INSERT INTO public.proposals(id,user_id,title,content,status,author_name,author_email,upvotes_count)
     VALUES ('20000000-0000-4000-8000-000000000001','${users.studentA.id}',
-    'Synthetic baseline proposal','Synthetic body','通過','Synthetic studentA','${users.studentA.email}',7);`);
+    'Synthetic baseline proposal','Synthetic body','處理中','Synthetic studentA','${users.studentA.email}',7);`);
   state.tokens = credentials(secret);
   sql(state.db, `CREATE FUNCTION public.synthetic_request_identity() RETURNS jsonb
     LANGUAGE sql STABLE SECURITY INVOKER SET search_path='' AS

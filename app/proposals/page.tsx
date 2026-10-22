@@ -19,10 +19,8 @@ import { ui } from '@/components/rights/ui';
 
 const EMPTY_MESSAGES = {
   all: '目前尚無公開提案。',
-  研議中: '目前尚無研議中的提案。',
-  通過: '目前尚無通過的提案。',
-  已採納: '目前尚無已採納的提案。',
-  不採納: '目前尚無不採納的提案。',
+  處理中: '目前尚無處理中的提案。',
+  已結案: '目前尚無已結案的提案。',
 } as const satisfies Record<ProposalsTab, string>;
 
 function subscribeToHash(listener: () => void) {
@@ -52,14 +50,12 @@ function ProposalsContent() {
   const forgetDrafts = useForgetItemDrafts();
   const queues: Readonly<Record<ProposalsTab, readonly ProposalDTO[]>> = {
     all: rows,
-    研議中: rows.filter(item => item.status === '研議中'),
-    通過: rows.filter(item => item.status === '通過'),
-    已採納: rows.filter(item => item.status === '已採納'),
-    不採納: rows.filter(item => item.status === '不採納'),
+    處理中: rows.filter(item => item.status === '處理中'),
+    已結案: rows.filter(item => item.status === '已結案'),
   };
   // Counts cover loaded pages only; server-side filtering would need an RPC/migration change.
-  const counts = { all: queues.all.length, 研議中: queues.研議中.length, 通過: queues.通過.length,
-    已採納: queues.已採納.length, 不採納: queues.不採納.length };
+  const counts = { all: queues.all.length, 處理中: queues.處理中.length,
+    已結案: queues.已結案.length };
   const selectedRows = queues[activeTab];
   // Keep the link hook on the full public list so tabs never refetch or hide a loaded hash target.
   const targetRow = (linked.target ? [...rows, linked.target] : rows).find(item => hash === `#item-${item.id}`);

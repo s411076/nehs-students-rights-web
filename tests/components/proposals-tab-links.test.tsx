@@ -7,11 +7,11 @@ import type { ProposalDTO } from '../../lib/rights/queries';
 vi.mock('../../components/AuthProvider', () => ({ useAuth: vi.fn() }));
 
 const discussing: ProposalDTO = {
-  id: 'discussing', title: '研議提案', content: '研議內容', author_name: '學生', status: '研議中',
+  id: 'processing', title: '處理中提案', content: '處理中內容', author_name: '學生', status: '處理中',
   reply: '', created_at: '2026-02-01T00:00:00Z', version: 3,
   upvotes_count: 0, viewer_voted: false, legacy_upvotes_count: 0,
 };
-const adopted: ProposalDTO = { ...discussing, id: 'adopted', title: '已採納連結目標', status: '已採納' };
+const adopted: ProposalDTO = { ...discussing, id: 'adopted', title: '已結案連結目標', status: '已結案' };
 const page = (items: readonly ProposalDTO[]) => Response.json({ ok: true, data: { items, nextCursor: null } });
 const tab = (label: string) => screen.getByRole('tab', { name: new RegExp(`^${label}`) });
 const frames = new Map<number, FrameRequestCallback>();
@@ -51,15 +51,15 @@ test.each([false, true])('keeps and scrolls a search hash when its status is fil
   await screen.findByRole('heading', { name: adopted.title });
   const reads = fetcher.mock.calls.length;
   // When
-  fireEvent.click(tab('研議中'));
+  fireEvent.click(tab('處理中'));
   act(paint);
   // Then counts remain loaded-only and the real public card is still the scroll target.
   const target = document.getElementById(`item-${adopted.id}`);
   expect(target).toBeVisible();
   expect(document.querySelectorAll(`#item-${adopted.id}`)).toHaveLength(1);
-  expect(tab('研議中')).toHaveAttribute('aria-selected', 'true');
-  expect(within(tab('研議中')).getByText('1')).toBeVisible();
-  expect(within(tab('已採納')).getByText(offPage ? '0' : '1')).toBeVisible();
+  expect(tab('處理中')).toHaveAttribute('aria-selected', 'true');
+  expect(within(tab('處理中')).getByText('1')).toBeVisible();
+  expect(within(tab('已結案')).getByText(offPage ? '0' : '1')).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(reads);
   expect(HTMLElement.prototype.scrollIntoView).toHaveBeenLastCalledWith({ block: 'start' });
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(target);
@@ -72,7 +72,7 @@ test('renders and scrolls an off-tab loaded card without an item read when the h
   const fetcher = list([discussing, adopted]);
   render(<ProposalsPage />);
   await screen.findByRole('tab', { name: /全部.*2/ });
-  fireEvent.click(tab('研議中'));
+  fireEvent.click(tab('處理中'));
   expect(screen.queryByRole('heading', { name: adopted.title })).toBeNull();
   // When
   act(() => {
@@ -84,7 +84,7 @@ test('renders and scrolls an off-tab loaded card without an item read when the h
   const target = document.getElementById(`item-${adopted.id}`);
   expect(target).toBeVisible();
   expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.instances.at(-1)).toBe(target);
-  expect(tab('研議中')).toHaveAttribute('aria-selected', 'true');
+  expect(tab('處理中')).toHaveAttribute('aria-selected', 'true');
   expect(fetcher.mock.calls.some(([input]) => String(input).includes('/items?'))).toBe(false);
 });
 
@@ -94,7 +94,7 @@ test('removes the off-tab exception when the hash is cleared', async () => {
   list([discussing, adopted]);
   render(<ProposalsPage />);
   await screen.findByRole('tab', { name: /全部.*2/ });
-  fireEvent.click(tab('研議中'));
+  fireEvent.click(tab('處理中'));
   // When
   act(() => {
     window.history.replaceState(null, '', '/proposals');
@@ -107,10 +107,8 @@ test('removes the off-tab exception when the hash is cleared', async () => {
 
 test.each([
   { label: '全部', empty: '目前尚無公開提案。' },
-  { label: '研議中', empty: '目前尚無研議中的提案。' },
-  { label: '通過', empty: '目前尚無通過的提案。' },
-  { label: '已採納', empty: '目前尚無已採納的提案。' },
-  { label: '不採納', empty: '目前尚無不採納的提案。' },
+  { label: '處理中', empty: '目前尚無處理中的提案。' },
+  { label: '已結案', empty: '目前尚無已結案的提案。' },
 ])('keeps unavailable-link feedback alongside the $label empty state', async ({ label, empty }) => {
   // Given a search hash that has no publicly accessible result.
   window.history.replaceState(null, '', '/proposals?q=找不到#item-adopted');
@@ -141,19 +139,19 @@ test('retains control and anonymous-comment drafts when a filtered card remounts
   if (!card) throw new TypeError('Missing discussing card');
   const editor = within(card);
   fireEvent.change(editor.getByRole('textbox', { name: /官方回覆/ }), { target: { value: '尚未送出的官方回覆' } });
-  fireEvent.change(editor.getByRole('combobox'), { target: { value: '不採納' } });
+  fireEvent.change(editor.getByRole('combobox'), { target: { value: '已結案' } });
   fireEvent.change(editor.getByRole('textbox', { name: /新增留言/ }), { target: { value: '尚未送出的匿名留言' } });
   fireEvent.click(editor.getByRole('checkbox'));
-  fireEvent.click(tab('已採納'));
+  fireEvent.click(tab('已結案'));
   expect(document.getElementById(`item-${discussing.id}`)).toBeNull();
   // When
-  fireEvent.click(tab('研議中'));
+  fireEvent.click(tab('處理中'));
   // Then
   const restored = document.getElementById(`item-${discussing.id}`);
   if (!restored) throw new TypeError('Missing restored card');
   const drafts = within(restored);
   expect(drafts.getByRole('textbox', { name: /官方回覆/ })).toHaveValue('尚未送出的官方回覆');
-  expect(drafts.getByRole('combobox')).toHaveValue('不採納');
+  expect(drafts.getByRole('combobox')).toHaveValue('已結案');
   expect(drafts.getByRole('textbox', { name: /新增留言/ })).toHaveValue('尚未送出的匿名留言');
   expect(drafts.getByRole('checkbox')).toBeChecked();
   expect(fetcher.mock.calls.filter(([input]) => new URL(String(input), 'http://localhost').pathname === '/api/rights/proposals')).toHaveLength(1);

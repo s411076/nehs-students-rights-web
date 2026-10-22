@@ -193,7 +193,7 @@ test('orders the loaded pending queue oldest-first without mixing public statuse
   // Given newest-first loaded pending pages with a no-longer-pending item.
   const old = { ...item, id: 'old', title: '最早待審核提案', created_at: '2026-01-01T00:00:00Z' };
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) =>
-    String(input).includes('/pending?') ? page([item, old, { ...item, id: 'public', status: '通過' }]) : page([])));
+    String(input).includes('/pending?') ? page([item, old, { ...item, id: 'public', status: '處理中' }]) : page([])));
   // When
   render(<ProposalsPage />);
   await screen.findByRole('link', { name: new RegExp(old.title) });

@@ -24,7 +24,7 @@ INSERT INTO auth.users(id,email,email_confirmed_at,raw_user_meta_data,banned_unt
  ('10000000-0000-4000-8000-000000000017','spoof@nehs.hc.edu.tw.evil.invalid',now(),'{}',NULL,false,NULL);
 INSERT INTO public.admins(email) VALUES ('admin-synthetic@nehs.hc.edu.tw');
 INSERT INTO public.proposals(id,title,content,status,author_name,is_anonymous,upvotes_count,legacy_upvotes_count)
- VALUES ('20000000-0000-4000-8000-000000000001','synthetic concurrency','synthetic content','研議中','Legacy synthetic label',false,37,37),
+ VALUES ('20000000-0000-4000-8000-000000000001','synthetic concurrency','synthetic content','處理中','Legacy synthetic label',false,37,37),
  ('20000000-0000-4000-8000-000000000002','synthetic pending','synthetic content','待審核','Legacy synthetic label',false,0,0),
  ('20000000-0000-4000-8000-000000000003','synthetic legacy','synthetic content','legacy-invalid','Untrusted synthetic',true,0,0);
 INSERT INTO public.endorsements(user_id,target_id,target_type) VALUES
@@ -156,7 +156,7 @@ BEGIN
         WHEN 'p_limit' THEN '20' WHEN 'p_cursor' THEN 'NULL::jsonb'
         WHEN 'p_query' THEN quote_literal('') WHEN 'p_kind' THEN quote_literal('proposal')
         WHEN 'p_expected_version' THEN '1::bigint' WHEN 'p_voted' THEN 'true' WHEN 'p_is_anonymous' THEN 'false'
-        WHEN 'p_category' THEN quote_literal('其他') WHEN 'p_status' THEN quote_literal('研議中')
+        WHEN 'p_category' THEN quote_literal('其他') WHEN 'p_status' THEN quote_literal('處理中')
         WHEN 'p_id' THEN quote_literal('20000000-0000-4000-8000-000000000001')||'::uuid'
         WHEN 'p_proposal_id' THEN quote_literal('20000000-0000-4000-8000-000000000001')||'::uuid'
         ELSE quote_literal('synthetic') END;
@@ -216,9 +216,9 @@ BEGIN
   PERFORM rights_test.throws(format('SELECT public.rights_reject_proposal(%L,1)',p),'PT409');
   PERFORM rights_test.throws(format('SELECT public.rights_reject_proposal(%L,2)',p),'PT409');
   PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''待審核'','''',2)',p),'PT400');
-  PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''通過'',repeat(''🏫'',5001),2)',p),'PT400');
-  PERFORM rights_test.assert(public.rights_update_proposal_control(p,'通過','final',2)->>'version'='3','control version');
-  PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''通過'',''stale draft'',2)',p),'PT409');
+  PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''處理中'',repeat(''🏫'',5001),2)',p),'PT400');
+  PERFORM rights_test.assert(public.rights_update_proposal_control(p,'處理中','final',2)->>'version'='3','control version');
+  PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''處理中'',''stale draft'',2)',p),'PT409');
   j:=public.rights_add_comment(p,'delete synthetic comment',false); c:=(j->>'id')::uuid;
   PERFORM rights_test.throws(format('SELECT public.rights_delete_comment(%L,''20000000-0000-4000-8000-000000000001'',1)',c),'PT409');
   PERFORM rights_test.assert(public.rights_delete_comment(c,p,1)->>'deleted'='true','delete comment');
@@ -260,7 +260,7 @@ SELECT rights_test.throws($q$INSERT INTO public.feedback(title,content,category,
 INSERT INTO public.proposals(id,title,content,status,created_at,author_name)
 SELECT ('30000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  CASE WHEN n%11=0 THEN 'synthetic-filter-needle' ELSE 'synthetic-pagination' END,
- 'synthetic body',CASE WHEN n%17=0 THEN '待審核' ELSE '研議中' END,
+ 'synthetic body',CASE WHEN n%17=0 THEN '待審核' ELSE '處理中' END,
  '2026-01-01T00:00:00.123456Z'::timestamptz + CASE WHEN n%3=0 THEN interval '1 microsecond' ELSE interval '0' END,'Synthetic'
 FROM generate_series(1,1107) n;
 INSERT INTO public.feedback(id,title,content,category,is_anonymous,author_name,created_at)

@@ -583,7 +583,7 @@ test.each(['feedback', 'proposal'] as const)('recovers the %s draft and original
   mockedAuth.mockReturnValue(adminAuth);
   const target = kind === 'feedback' ? { ...anonymousRow, reply: 'Original public reply' } : {
     id: 'retry-proposal', title: 'Retry proposal', content: 'Public proposal body', author_name: 'Student',
-    status: '研議中', reply: 'Original public reply', version: 1, upvotes_count: 0,
+    status: '處理中', reply: 'Original public reply', version: 1, upvotes_count: 0,
     viewer_voted: false, legacy_upvotes_count: 0, created_at: '2026-01-01T00:00:00Z',
   };
   const path = kind === 'feedback' ? '/feedback' : '/proposals';

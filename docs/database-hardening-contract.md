@@ -89,6 +89,14 @@ attribution in DB, enforces defaults and existing Unicode-safe title rules.
 Vote derives user from auth.uid(), serializes on proposal, is desired-state
 idempotent, and cannot reduce historical baseline. Old ledgers are not double-counted.
 
+Proposal status model: 待審核 (unpublished gate), 處理中 (all live undecided),
+已結案 (decided), plus internal invisible 被退回. updateProposalControl
+p_status accepts only 處理中 / 已結案; approveProposal lands 處理中 and
+rejectProposal lands 被退回. Public list/item reads filter 處理中 / 已結案
+only; pending reads filter 待審核. The decided outcome (採納 / 不採納 + 理由)
+lives in the official reply text as the documented 決議：採納／不採納＋理由
+convention (editor guidance/placeholder only, no hard DB validation).
+
 version is content_version for proposals/feedback, unaffected by votes/comments.
 Approve/reject require matching version AND pending status. Drafts retain their
 original baseVersion across refreshes and conflicts. Private mutation history

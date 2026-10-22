@@ -30,8 +30,8 @@ test('returns verified student when real SDK requests user', async () => {
 
 test('projects and filters when SDK requests public fields', async () => {
   const client = createClient(fixture.url, fakePublishableKey, { auth: { persistSession: false } });
-  const result = await client.from('proposals').select('id,status').in('status', ['研議中']).eq('id', 'proposal-1').limit(1);
-  expect(result.data).toEqual([{ id: 'proposal-1', status: '研議中' }]);
+  const result = await client.from('proposals').select('id,status').in('status', ['處理中']).eq('id', 'proposal-1').limit(1);
+  expect(result.data).toEqual([{ id: 'proposal-1', status: '處理中' }]);
 });
 
 test('allows unauthorized privileged student mutation when bypassing application', async () => {

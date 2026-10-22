@@ -39,7 +39,7 @@ for (const kind of ['malformed', 'rejected']) {
   const context = {
     supabase: { from() { return query; } }, generation: 1,
     currentAuth: { current: { generation: 1 } }, mounted: { current: true },
-    PUBLIC_STATUSES: ['研議中'], PROPOSAL_SELECT_STRING: 'id,title,status',
+    PUBLIC_STATUSES: ['處理中'], PROPOSAL_SELECT_STRING: 'id,title,status',
     makeFailure: code => ({ ok: false, code }),
     setPublicListStatus: status => statuses.push(status),
     capturePromise: promise => { readPromise = promise; return promise; },

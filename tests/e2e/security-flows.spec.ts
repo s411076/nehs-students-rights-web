@@ -9,7 +9,7 @@ const privileged = [
   { action: 'approveProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
   { action: 'rejectProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
   { action: 'deleteProposal', payload: { id: 'proposal-1', expectedVersion: 1 } },
-  { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '通過', reply: 'ATTACK', expectedVersion: 1 } },
+  { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '處理中', reply: 'ATTACK', expectedVersion: 1 } },
   { action: 'deleteComment', payload: { id: 'comment-1', proposalId: 'proposal-1', expectedVersion: 1 } },
   { action: 'createHomeSection', payload: { title: 'ATTACK', content: 'ATTACK' } },
   { action: 'deleteHomeSection', payload: { id: 'section-1', expectedVersion: 1 } },
@@ -36,7 +36,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
       await expect(page.getByText('Offline fixture announcement', { exact: true })).toBeVisible();
       const search = page.getByPlaceholder(/搜尋/);
       await search.fill('Fixture');
-      await expect(page.getByText('Fixture 研議中', { exact: true })).toBeVisible();
+      await expect(page.getByText('Fixture 處理中', { exact: true })).toBeVisible();
       // Then neither hidden status nor private field reaches the rendered search.
       await expect(page.locator('body')).not.toContainText('Fixture 待審核');
       await expect(page.locator('body')).not.toContainText('Fixture 被退回');
@@ -104,7 +104,7 @@ test('crafted origin, payload, private target and stale auth requests never muta
   await login(context, 'student');
   // When crossing request validation, visibility and fresh-auth boundaries.
   for (const origin of [null, 'null', 'https://foreign.example.test']) expect((await post(context, createProposal, origin)).status()).toBe(403);
-  expect((await post(context, { ...createProposal, payload: { ...createProposal.payload, author_name: 'FORGED', status: '通過' } })).status()).toBe(400);
+  expect((await post(context, { ...createProposal, payload: { ...createProposal.payload, author_name: 'FORGED', status: '處理中' } })).status()).toBe(400);
   for (const proposalId of ['proposal-2', 'proposal-3', 'missing']) {
     expect((await post(context, { action: 'addComment', payload: { proposalId, content: 'ATTACK', isAnonymous: false } })).status()).toBe(409);
   }

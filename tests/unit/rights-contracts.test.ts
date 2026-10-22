@@ -14,7 +14,7 @@ const payloads = [
   { action: 'createFeedback', payload: { title: '', content: 'body', category: '其他', isAnonymous: true } },
   { action: 'addComment', payload: { proposalId: 'proposal-1', content: 'body', isAnonymous: false } },
   { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true } },
-  { action: 'updateProposalControl', payload: { id: 'p', expectedVersion: 1, status: '通過', reply: '' } },
+  { action: 'updateProposalControl', payload: { id: 'p', expectedVersion: 1, status: '處理中', reply: '' } },
   { action: 'approveProposal', payload: { id: 'p', expectedVersion: 1 } },
   { action: 'rejectProposal', payload: { id: 'p', expectedVersion: 1 } },
   { action: 'deleteProposal', payload: { id: 'p', expectedVersion: 1 } },
@@ -90,7 +90,7 @@ describe('Unicode-safe validation', () => {
   });
 });
 const base = { id: 'p', title: 't', content: 'c', created_at: '2026-01-01T00:00:00.123456Z', version: 1 };
-const proposal = { ...base, author_name: 'student', status: '研議中', upvotes_count: 7, legacy_upvotes_count: 6, viewer_voted: true, reply: '' };
+const proposal = { ...base, author_name: 'student', status: '處理中', upvotes_count: 7, legacy_upvotes_count: 6, viewer_voted: true, reply: '' };
 const feedback = { ...base, category: '其他', is_anonymous: true, reply: '', replied_at: null, author_name: 'PRIVATE_AUTHOR' };
 describe('projected DTOs', () => {
   it('drops private fields rather than forwarding RPC objects', () => {

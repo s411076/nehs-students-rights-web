@@ -18,12 +18,12 @@ function member(isAdmin: boolean): AuthContextValue {
 const base = { content: '公開提案內容', author_name: '學生', reply: '', version: 1,
   viewer_voted: false, upvotes_count: 0, legacy_upvotes_count: 0 } as const;
 const rows: readonly ProposalDTO[] = [
-  { ...base, id: 'discuss-new', title: '最新研議提案', status: '研議中', created_at: '2026-02-06T00:00:00Z' },
-  { ...base, id: 'declined-new', title: '最新不採納提案', status: '不採納', created_at: '2026-02-05T00:00:00Z' },
-  { ...base, id: 'passed', title: '通過提案', status: '通過', created_at: '2026-02-04T00:00:00Z' },
-  { ...base, id: 'adopted', title: '已採納提案', status: '已採納', created_at: '2026-02-03T00:00:00Z' },
-  { ...base, id: 'declined-old', title: '較舊不採納提案', status: '不採納', created_at: '2026-02-02T00:00:00Z' },
-  { ...base, id: 'discuss-old', title: '較舊研議提案', status: '研議中', created_at: '2026-02-01T00:00:00Z' },
+  { ...base, id: 'processing-new', title: '最新處理中提案', status: '處理中', created_at: '2026-02-06T00:00:00Z' },
+  { ...base, id: 'closed-new', title: '最新已結案提案', status: '已結案', created_at: '2026-02-05T00:00:00Z' },
+  { ...base, id: 'processing-mid', title: '處理中提案', status: '處理中', created_at: '2026-02-04T00:00:00Z' },
+  { ...base, id: 'closed-mid', title: '已結案提案', status: '已結案', created_at: '2026-02-03T00:00:00Z' },
+  { ...base, id: 'closed-old', title: '較舊已結案提案', status: '已結案', created_at: '2026-02-02T00:00:00Z' },
+  { ...base, id: 'processing-old', title: '較舊處理中提案', status: '處理中', created_at: '2026-02-01T00:00:00Z' },
 ];
 const page = (items: readonly ProposalDTO[], nextCursor: PageCursor | null = null) =>
   Response.json({ ok: true, data: { items, nextCursor } });
@@ -56,15 +56,13 @@ test.each([
   expect(tab('全部')).toHaveAttribute('tabindex', '0');
   expect(screen.getAllByRole('tab', { selected: true })).toHaveLength(1);
   expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', tab('全部').id);
-  expect(screen.getAllByRole('tab').map(node => node.textContent)).toEqual(['全部6', '研議中2', '通過1', '已採納1', '不採納2']);
+  expect(screen.getAllByRole('tab').map(node => node.textContent)).toEqual(['全部6', '處理中3', '已結案3']);
 });
 
 test.each([
-  { label: '全部', expected: ['最新研議提案', '最新不採納提案', '通過提案', '已採納提案', '較舊不採納提案', '較舊研議提案'] },
-  { label: '研議中', expected: ['最新研議提案', '較舊研議提案'] },
-  { label: '通過', expected: ['通過提案'] },
-  { label: '已採納', expected: ['已採納提案'] },
-  { label: '不採納', expected: ['最新不採納提案', '較舊不採納提案'] },
+  { label: '全部', expected: ['最新處理中提案', '最新已結案提案', '處理中提案', '已結案提案', '較舊已結案提案', '較舊處理中提案'] },
+  { label: '處理中', expected: ['最新處理中提案', '處理中提案', '較舊處理中提案'] },
+  { label: '已結案', expected: ['最新已結案提案', '已結案提案', '較舊已結案提案'] },
 ])('filters $label in newest-first order without a list refetch when selected', async ({ label, expected }) => {
   // Given loaded public statuses, plus private states that must stay excluded.
   const publicRead = list([...rows,
@@ -84,15 +82,13 @@ test.each([
 });
 
 test.each([
-  { from: '全部', key: 'ArrowRight', to: '研議中' },
-  { from: '研議中', key: 'ArrowRight', to: '通過' },
-  { from: '通過', key: 'ArrowRight', to: '已採納' },
-  { from: '已採納', key: 'ArrowRight', to: '不採納' },
-  { from: '不採納', key: 'ArrowRight', to: '全部' },
-  { from: '全部', key: 'ArrowLeft', to: '不採納' },
-  { from: '通過', key: 'ArrowLeft', to: '研議中' },
-  { from: '全部', key: 'End', to: '不採納' },
-  { from: '不採納', key: 'Home', to: '全部' },
+  { from: '全部', key: 'ArrowRight', to: '處理中' },
+  { from: '處理中', key: 'ArrowRight', to: '已結案' },
+  { from: '已結案', key: 'ArrowRight', to: '全部' },
+  { from: '全部', key: 'ArrowLeft', to: '已結案' },
+  { from: '已結案', key: 'ArrowLeft', to: '處理中' },
+  { from: '全部', key: 'End', to: '已結案' },
+  { from: '已結案', key: 'Home', to: '全部' },
 ])('selects and focuses $to when $key is pressed on $from', async ({ from, key, to }) => {
   // Given
   const publicRead = list();
@@ -136,10 +132,8 @@ test('replaces skeleton counts in stable slots when the first page arrives', asy
 
 test.each([
   { label: '全部', message: '目前尚無公開提案。' },
-  { label: '研議中', message: '目前尚無研議中的提案。' },
-  { label: '通過', message: '目前尚無通過的提案。' },
-  { label: '已採納', message: '目前尚無已採納的提案。' },
-  { label: '不採納', message: '目前尚無不採納的提案。' },
+  { label: '處理中', message: '目前尚無處理中的提案。' },
+  { label: '已結案', message: '目前尚無已結案的提案。' },
 ])('shows the $label empty state when its loaded filter has no rows', async ({ label, message }) => {
   // Given
   list([]);
@@ -153,22 +147,22 @@ test.each([
 });
 
 test('continues an empty active filter and updates loaded counts when the next page arrives', async () => {
-  // Given a first page without any passed proposal.
-  const cursor = { created_at: '2026-02-05T00:00:00Z', id: 'declined-new' };
+  // Given a first page without any closed proposal.
+  const cursor = { created_at: '2026-02-06T00:00:00Z', id: 'processing-new' };
   const publicRead = list();
-  publicRead.mockReset().mockResolvedValueOnce(page(rows.slice(0, 2), cursor)).mockResolvedValueOnce(page(rows.slice(2)));
+  publicRead.mockReset().mockResolvedValueOnce(page(rows.slice(0, 1), cursor)).mockResolvedValueOnce(page(rows.slice(1)));
   render(<ProposalsPage />);
-  await screen.findByRole('tab', { name: /全部.*2/ });
-  fireEvent.click(tab('通過'));
-  expect(screen.getByText('目前尚無通過的提案。')).toBeVisible();
+  await screen.findByRole('tab', { name: /全部.*1/ });
+  fireEvent.click(tab('已結案'));
+  expect(screen.getByText('目前尚無已結案的提案。')).toBeVisible();
   // When
   fireEvent.click(screen.getByRole('button', { name: '載入更多公開提案' }));
   // Then
-  await screen.findByRole('heading', { name: '通過提案' });
-  expect(titles()).toEqual(['通過提案']);
-  expect(tab('通過')).toHaveAttribute('aria-selected', 'true');
+  await screen.findByRole('heading', { name: '最新已結案提案' });
+  expect(titles()).toEqual(['最新已結案提案', '已結案提案', '較舊已結案提案']);
+  expect(tab('已結案')).toHaveAttribute('aria-selected', 'true');
   expect(within(tab('全部')).getByText('6')).toBeVisible();
-  expect(within(tab('通過')).getByText('1')).toBeVisible();
+  expect(within(tab('已結案')).getByText('3')).toBeVisible();
   expect(publicRead).toHaveBeenCalledTimes(2);
   const request = new URL(String(publicRead.mock.calls[1]?.[0]), 'http://localhost');
   expect(JSON.parse(request.searchParams.get('cursor') ?? 'null')).toEqual(cursor);

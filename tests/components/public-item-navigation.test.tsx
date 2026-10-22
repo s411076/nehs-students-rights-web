@@ -17,7 +17,7 @@ const feedback: FeedbackPublicDTO = {
   is_anonymous: true, reply: '', replied_at: null, created_at: '2026-01-01T00:00:00Z', version: 1,
 };
 const proposal: ProposalDTO = {
-  id: 'target-25', title: '目標提案', content: '公開提案內容', author_name: '學生', status: '研議中',
+  id: 'target-25', title: '目標提案', content: '公開提案內容', author_name: '學生', status: '處理中',
   reply: '', created_at: '2026-01-01T00:00:00Z', version: 1,
   upvotes_count: 0, viewer_voted: false, legacy_upvotes_count: 0,
 };

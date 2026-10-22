@@ -13,6 +13,7 @@ import { ui } from '@/components/rights/ui';
 export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO; readonly refresh: () => Promise<unknown> }) {
   const draft = useVersionedDraft({ status: item.status, reply: item.reply }, item.version, useProposalControlDraft(item.id));
   const mutation = useRightsMutation();
+  const isClosed = draft.value.status === '已結案';
   const save = async () => {
     const value = draft.value;
     if (item.reply && !value.reply.trim() && !window.confirm('確定要清除官方回覆嗎？')) return;
@@ -34,8 +35,9 @@ export function ProposalControl({ item, refresh }: { readonly item: ProposalDTO;
       </div>
       <div className="min-w-0 flex-1 space-y-1">
         <label htmlFor={`proposal-reply-${item.id}`} className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-neutral-300"><PencilLine aria-hidden="true" className="size-4 shrink-0" />官方回覆<span className="sr-only">：{item.title}</span></label>
+        {isClosed && <p className="text-xs text-gray-500 dark:text-neutral-400">已結案請以「決議：採納／不採納＋理由」格式填寫官方回覆。</p>}
         <input id={`proposal-reply-${item.id}`} type="text" value={draft.value.reply} disabled={mutation.busy}
-          onChange={event => draft.edit({ ...draft.value, reply: event.target.value })} placeholder="輸入官方回覆內容..."
+          onChange={event => draft.edit({ ...draft.value, reply: event.target.value })} placeholder={isClosed ? '決議：採納／不採納＋理由，例如：決議：採納，圖書館延長開放時間…' : '輸入官方回覆內容...'}
           className={ui.field} />
       </div>
       <button type="button" onClick={() => void save()} disabled={mutation.busy}

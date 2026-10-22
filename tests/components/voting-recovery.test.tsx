@@ -21,7 +21,7 @@ function deferred() {
 }
 const success = (count: number, voted = true) => Response.json({ ok: true, data: { id: 'p1', voted, upvotes_count: count } });
 const rows = () => ['p1', 'p2'].map(id => ({
-  id, title: id, content: 'Body', status: '研議中', upvotes_count: state.count, viewer_voted: state.voted,
+  id, title: id, content: 'Body', status: '處理中', upvotes_count: state.count, viewer_voted: state.voted,
   legacy_upvotes_count: 4, version: 1, author_name: 'Student', reply: '', created_at: '2026-10-14T00:00:00Z',
 }));
 function installFetch(mutate: () => Promise<Response> | Response) {
@@ -165,7 +165,7 @@ test('recovers an off-page proposal conflict through targeted reload and explici
   state.auth = { status: 'verified', identity, user: identity, generation: 1, isLoggedIn: true, isAdmin: true };
   window.history.replaceState(null, '', '/proposals#item-off-page');
   HTMLElement.prototype.scrollIntoView = vi.fn();
-  let remote = { ...rows()[0], id: 'off-page', title: 'Targeted proposal', content: 'Targeted body', status: '研議中', reply: 'Original targeted reply', version: 1 };
+  let remote = { ...rows()[0], id: 'off-page', title: 'Targeted proposal', content: 'Targeted body', status: '處理中', reply: 'Original targeted reply', version: 1 };
   const requests: unknown[] = [];
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
@@ -188,8 +188,8 @@ test('recovers an off-page proposal conflict through targeted reload and explici
   if (!card) throw new TypeError('Missing linked proposal');
   const editor = within(card);
   fireEvent.change(editor.getByRole('textbox', { name: /官方回覆/ }), { target: { value: 'Unmerged proposal draft' } });
-  fireEvent.change(editor.getByRole('combobox'), { target: { value: '不採納' } });
-  remote = { ...remote, status: '通過', reply: 'Latest targeted proposal reply', version: 2 };
+  fireEvent.change(editor.getByRole('combobox'), { target: { value: '已結案' } });
+  remote = { ...remote, status: '處理中', reply: 'Latest targeted proposal reply', version: 2 };
   fireEvent.click(editor.getByRole('button', { name: /儲存修改/ }));
   await editor.findByRole('alert');
   // When reloading the conflict, list refresh alone cannot recover this version.
@@ -197,20 +197,20 @@ test('recovers an off-page proposal conflict through targeted reload and explici
   // Then reply and status stay dirty at version 1 until explicit adoption.
   expect(await editor.findByText('Latest targeted proposal reply')).toBeVisible();
   expect(editor.getByRole('textbox', { name: /官方回覆/ })).toHaveValue('Unmerged proposal draft');
-  expect(editor.getByRole('combobox')).toHaveValue('不採納');
+  expect(editor.getByRole('combobox')).toHaveValue('已結案');
   fireEvent.click(editor.getByRole('button', { name: /儲存修改/ }));
   await waitFor(() => expect(editor.getByRole('button', { name: /儲存修改/ })).toBeEnabled());
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   fireEvent.click(editor.getByRole('button', { name: '捨棄草稿並使用最新內容' }));
   expect(editor.getByRole('textbox', { name: /官方回覆/ })).toHaveValue('Latest targeted proposal reply');
-  expect(editor.getByRole('combobox')).toHaveValue('通過');
+  expect(editor.getByRole('combobox')).toHaveValue('處理中');
   fireEvent.change(editor.getByRole('textbox', { name: /官方回覆/ }), { target: { value: 'Merged proposal reply' } });
   fireEvent.click(editor.getByRole('button', { name: /儲存修改/ }));
   expect(await editor.findByRole('status')).toHaveTextContent('操作已成功完成。');
   expect(requests).toEqual([
-    { action: 'updateProposalControl', payload: { id: remote.id, status: '不採納', reply: 'Unmerged proposal draft', expectedVersion: 1 } },
-    { action: 'updateProposalControl', payload: { id: remote.id, status: '不採納', reply: 'Unmerged proposal draft', expectedVersion: 1 } },
-    { action: 'updateProposalControl', payload: { id: remote.id, status: '通過', reply: 'Merged proposal reply', expectedVersion: 2 } },
+    { action: 'updateProposalControl', payload: { id: remote.id, status: '已結案', reply: 'Unmerged proposal draft', expectedVersion: 1 } },
+    { action: 'updateProposalControl', payload: { id: remote.id, status: '已結案', reply: 'Unmerged proposal draft', expectedVersion: 1 } },
+    { action: 'updateProposalControl', payload: { id: remote.id, status: '處理中', reply: 'Merged proposal reply', expectedVersion: 2 } },
   ]);
   expect(fetcher.mock.calls.filter(([path]) => String(path).includes('/api/rights/items?'))).toHaveLength(3);
 });

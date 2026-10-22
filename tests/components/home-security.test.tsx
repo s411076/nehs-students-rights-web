@@ -104,7 +104,7 @@ function asAnonymous(generation = 0) {
 
 const publicProposal = () => ({
   id: 'p-1', title: '鞦韆整修提案', content: '操場鞦韆需要整修',
-   author_name: '王小明', status: '研議中', upvotes_count: 3, reply: '', created_at: '2026-01-01T00:00:00Z', version: 1, viewer_voted: false, legacy_upvotes_count: 3,
+   author_name: '王小明', status: '處理中', upvotes_count: 3, reply: '', created_at: '2026-01-01T00:00:00Z', version: 1, viewer_voted: false, legacy_upvotes_count: 3,
 });
 const pendingProposal = () => ({ ...publicProposal(), id: 'p-2', title: '鞦韆秘密提案', status: '待審核', upvotes_count: 0 });
 const rejectedProposal = () => ({ ...publicProposal(), id: 'p-3', title: '鞦韆拆除提案', status: '被退回', upvotes_count: 0 });
@@ -134,7 +134,7 @@ function stubFetch(handler: (url: string, init: RequestInit | undefined) => Resp
       if (result.error || !Array.isArray(result.data)) return rightsBody({ ok: false, code: 'UNAVAILABLE' });
       const query = (parsed.searchParams.get('query') ?? '').toLowerCase();
       const rows = result.data.filter(row => typeof row === 'object' && row !== null &&
-        (table !== 'proposals' || ('status' in row && ['研議中', '通過', '已採納', '不採納'].includes(String(row.status)))) &&
+        (table !== 'proposals' || ('status' in row && ['處理中', '已結案'].includes(String(row.status)))) &&
         (!query || ('title' in row && String(row.title).toLowerCase().includes(query)) || ('content' in row && String(row.content).toLowerCase().includes(query))));
       return rightsBody({ ok: true, data: { items: rows, nextCursor: null } });
     }

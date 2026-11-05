@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# editors (per-machine workspace state, regenerates on open)
+.idea/
+.vscode/
+
+# local test / tool artifacts (regenerated on every run, never commit)
+.playwright-mcp/
+playwright-report/
+test-results/
+supabase/.temp/
+tests/database/verification-*.json

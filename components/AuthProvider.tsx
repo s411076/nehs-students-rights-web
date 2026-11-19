@@ -105,6 +105,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const invalidateLogout = useRef(() => {});
   const retryVerification = useRef(() => {});
   const [verification, setVerification] = useState<VerificationState>({ status: 'checking', epoch: 0 });
+  const [showChecking, setShowChecking] = useState(false);
   const verificationRef = useRef(verification);
   const retry = useCallback(() => { retryVerification.current(); }, []);
   const isCurrent = useCallback((epoch: number) => !logoutBlocked.current &&
@@ -134,6 +135,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       const next = { status, epoch: sequence };
       verificationRef.current = next;
       setVerification(next);
+      if (status !== 'checking') setShowChecking(status === 'unavailable');
     };
     const invalidate = (status: 'loading' | 'anonymous') => {
       controller.abort();
@@ -192,7 +194,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       if (deferred) queueMicrotask(() => { void verify(request); });
       else void verify(request);
     };
-    retryVerification.current = () => { startCheck(false); };
+    retryVerification.current = () => { setShowChecking(true); startCheck(false); };
     let unsubscribe = () => {};
     try {
       const { data } = createClient().auth.onAuthStateChange((event, session) => {
@@ -237,7 +239,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     <OAuthReturnContext.Provider value={oauthReturn}>
       <Context.Provider value={value}>
         <VerificationContext.Provider value={{ ...verification, canWrite: verification.status === 'ready', retry, isCurrent }}>
-          <VerificationBanner hasIdentity={state.identity !== null} />
+          <VerificationBanner hasIdentity={state.identity !== null} showChecking={showChecking} />
           <Fragment key={state.generation}>{children}</Fragment>
         </VerificationContext.Provider>
       </Context.Provider>

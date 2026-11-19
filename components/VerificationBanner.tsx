@@ -3,14 +3,19 @@
 import { useVerification } from './VerificationContext';
 import { ui } from './rights/ui';
 
-export function VerificationBanner({ hasIdentity }: { readonly hasIdentity: boolean }) {
+export function VerificationBanner({ hasIdentity, showChecking }: {
+  readonly hasIdentity: boolean;
+  readonly showChecking: boolean;
+}) {
   const { status, retry } = useVerification();
   let message: string;
   switch (status) {
     case 'ready': return null;
     case 'checking':
-      if (!hasIdentity) return null;
-      message = '正在重新驗證登入狀態。草稿已保留，仍可繼續編輯；送出、儲存與作者查詢暫停。';
+      if (!showChecking) return null;
+      message = hasIdentity
+        ? '正在重新驗證登入狀態。草稿已保留，仍可繼續編輯；送出、儲存與作者查詢暫停。'
+        : '正在重新驗證登入狀態，尚未開放登入後操作。';
       break;
     case 'unavailable':
       message = hasIdentity

@@ -76,7 +76,7 @@ node tests/real/boundary.http.mjs "$STATE"
 絕不在此任務部署正式。正式套用是未來獨立協調切換，必須與相容網站同版進行；
 migration 與網站是同一部署單位，不可各自獨立上線。
 
-- 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse），
+- 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse → filtered queues → keyed creates），
   `regression.mjs`、`managed-principal.mjs` 與 `stack.mjs apply` 都跑整鏈並逐檔 SHA-256 驗證，
   不允許單檔子集套用。`stack.mjs apply` 用法為 `apply STATE SHA1 SHA2...`（每檔一個已完成雜湊）。
   這是全新測試資料庫的規則；正式環境依 migration history 只套尚未執行的版本，不重跑第 7 節已完成的 hardening。

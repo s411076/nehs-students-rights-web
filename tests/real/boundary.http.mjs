@@ -74,7 +74,7 @@ try {
     for (const name of ['anon', 'outsider', 'unconfirmed']) {
       await check(`hardened mutation independently rejects ${name}`, async () => {
         // Given an ineligible identity; When RPC creates content; Then DB identity checks deny it.
-        const result = await client(state.tokens[name]).rpc('rights_create_proposal', {
+        const result = await client(state.tokens[name]).rpc('rights_create_proposal', { p_client_key: crypto.randomUUID(),
           p_title: 'Synthetic denied proposal', p_content: 'Synthetic body', p_category: '其他',
         });
         assert.ok([401, 403].includes(result.status));

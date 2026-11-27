@@ -58,4 +58,7 @@ export async function executeRightsAction(client: SupabaseClient, request: Right
   const receipt = parseMutationReceipt(data, request);
   return receipt ? makeSuccess(receipt) : makeFailure('UNAVAILABLE');
 }
-function assertNever(_value: never): never { throw new TypeError('Unknown rights action'); }
+function assertNever(value: never): never {
+  void value;
+  throw new TypeError('Unknown rights action');
+}

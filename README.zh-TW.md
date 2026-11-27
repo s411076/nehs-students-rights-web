@@ -4,7 +4,7 @@
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node >= 20](https://img.shields.io/badge/Node-%3E%3D20-green)](https://nodejs.org)
+[![Node.js 最低版本為 22.22.2](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
 English version: [English](./README.md)
 
@@ -21,7 +21,7 @@ English version: [English](./README.md)
 
 前置需求：
 
-- Node.js 20.9 以上（Next.js 16 需要），npm 隨附即可。
+- Node.js 22.x（22.22.2 以上）、24.x（24.15.0 以上），或 26.0.0 以上（鎖定的相依套件所需）。可執行 `nvm install` 選用 `.nvmrc` 指定的版本，使用隨附的 npm 即可。
 - 一個 Supabase 專案，提供專案 URL 與 publishable（anon）key。本機開發與測試只用公開 key，從不使用 service-role key。
 
 環境設定：
@@ -59,12 +59,11 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
 `build` 不可裸跑：`/auth/callback` 靜態預渲染會觸發 fail-closed 的瀏覽器 factory（缺公開設定即拋錯），裸 `npm run build` 在此失敗是預期行為，不是回歸。上面的前綴把設定釘到無用的 loopback（port 9）並用 `tests/fixtures/google-fonts.cjs` mock Google Fonts，讓 build 全程離線。全是夾具假 key，不含真實 secret。
-
-`lint` 目前回報 3 errors、5 warnings（exit 1），全是修復前已存在的問題（callback `Link`、`AuthProvider` effect 與既有 warning；已從 12 errors、5 warnings 的歷史修復基準下降），要認列它，不要誤標為通過。安全邊界與殘餘風險寫在 `docs/security-source-remediation.md`。
 
 ## How It Works
 
@@ -107,39 +106,19 @@ lib/
   supabase.ts            瀏覽器 singleton factory
 proxy.ts                 refresh 傳遞與靜態排除
 tests/
-  unit/                  契約、伺服器驗證、文件一致性
+  unit/                  契約與伺服器驗證
   components/            各頁安全行為
   integration/           路由、headers、session 邊界
   e2e/                   真機瀏覽器安全流程
   fixtures/              離線假 provider、字型 mock
 docs/
-  security-source-remediation.md  安全修復邊界與驗證文件
   database-hardening.md           本機資料庫強化現況與發布門檻（尚未上線）
   database-hardening-contract.md  強化工作的 RPC、讀取與寫入契約
 ```
 
 ## Documentation
 
-資料庫修復的本機現況與正式發布門檻：[資料庫強化 runbook](./docs/database-hardening.md)。契約：[資料庫強化契約](./docs/database-hardening-contract.md)。`docs/security-source-remediation.md` 只描述早期的 source-only 工作，保持原範圍，不改寫它。
-
-`docs/security-source-remediation.md` 記錄先前的 source-only 安全修復，歷史各節如下：
-
-| 節 | 內容 |
-| --- | --- |
-| §1 範圍 | 只改 source，不碰資料庫與部署 |
-| §2 路由與直接呼叫 | 應用程式路由和直接 PostgREST 的差別 |
-| §3 對照表 | 23 項發現的修復、緩解、延後、未驗證 |
-| §4 殘餘風險 | 需資料庫配合的風險 ledger |
-| §5 相容性風險 | 大小寫、Origin、投票總數等已知風險 |
-| §6 離線驗證 | 可執行的離線驗證方式 |
-| §7 部署未測試 | 部署未測試和 source 無保護的區別 |
-| §8 完成 ledger | 已合併 fix packs 的完成紀錄 |
-
-資料庫強化 runbook：`docs/database-hardening.md`（本機現況與正式發布門檻，歷史文件範圍不變）。
-
-資料庫強化 runbook：`docs/database-hardening.md`（本機現況與正式發布門檻，歷史文件範圍不變）。
-
-資料庫強化 runbook：`docs/database-hardening.md`（本機現況與正式發布門檻，歷史文件範圍不變）。
+資料庫修復的本機現況與正式發布門檻：[資料庫強化 runbook](./docs/database-hardening.md)。契約：[資料庫強化契約](./docs/database-hardening-contract.md)。
 
 ## 測試與離線驗證
 
@@ -157,6 +136,7 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
@@ -177,7 +157,4 @@ npm run test:e2e -- tests/e2e/security-flows.spec.ts
 
 Notes: the fake provider is intentionally permissive, so a denied request in tests
 proves the application guard blocked it, not the database. Real-database evidence
-comes only from the separate gates in `docs/database-hardening.md`. `lint` currently reports
-3 errors and 5 warnings (exit 1), all pre-existing (down from the 12-error, 5-warning
-historical repair baseline); identify it, do not mislabel it as passing. Security boundaries and residual risks are described
-in `docs/security-source-remediation.md`.
+comes only from the separate gates in `docs/database-hardening.md`.

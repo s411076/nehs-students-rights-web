@@ -4,7 +4,7 @@ A campus website for student proposals, petitions, feedback, and announcements, 
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node >= 20](https://img.shields.io/badge/Node-%3E%3D20-green)](https://nodejs.org)
+[![Node.js 22.22.2 minimum](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
 Traditional Chinese version: [中文版](./README.zh-TW.md)
 
@@ -21,7 +21,7 @@ Traditional Chinese version: [中文版](./README.zh-TW.md)
 
 Prerequisites:
 
-- Node.js 20.9 or later (required by Next.js 16); the bundled npm is fine.
+- Node.js 22.22.2+ in the 22.x series, 24.15.0+ in the 24.x series, or 26.0.0 or later (required by the locked dependencies). Use `nvm install` to select the version in `.nvmrc`; the bundled npm is fine.
 - A Supabase project providing the project URL and publishable (anon) key. Local development and testing use only the public key, never the service-role key.
 
 Environment setup:
@@ -59,12 +59,11 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
 `build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
-
-`lint` currently reports 3 errors and 5 warnings (exit 1), all pre-existing (callback `Link`, `AuthProvider` effect, and existing warnings; down from the 12-error, 5-warning historical repair baseline); acknowledge it, do not mislabel it as passing. Security boundaries and residual risks are described in `docs/security-source-remediation.md`.
 
 ## How It Works
 
@@ -107,33 +106,19 @@ lib/
   supabase.ts            Browser singleton factory
 proxy.ts                 Refresh forwarding and static exclusions
 tests/
-  unit/                  Contracts, server verification, docs consistency
+  unit/                  Contracts and server verification
   components/            Per-page security behavior
   integration/           Routes, headers, session boundaries
   e2e/                   Real-browser security flows
   fixtures/              Offline fake provider, font mock
 docs/
-  security-source-remediation.md  Security remediation scope and verification docs
   database-hardening.md           Local DB hardening status and release gates (not deployed)
   database-hardening-contract.md  RPC, read, and mutation contract for the hardening work
 ```
 
 ## Documentation
 
-`docs/security-source-remediation.md` records the earlier source-only security remediation. Its historical sections are:
-
-| Section | Contents |
-| --- | --- |
-| §1 Scope | Source changes only, no database or deployment changes |
-| §2 Routes and direct calls | Difference between app routes and direct PostgREST |
-| §3 Mapping | Fixes, mitigations, deferrals, and unverified items across 23 findings |
-| §4 Residual risks | Risk ledger requiring database cooperation |
-| §5 Compatibility risks | Known risks around casing, Origin, vote totals, and more |
-| §6 Offline verification | Executable offline verification methods |
-| §7 Deployment untested | Difference between untested deployment and unprotected source |
-| §8 Completion ledger | Completion record of merged fix packs |
-
-Database hardening runbook: `docs/database-hardening.md` (local-only status plus coordinated release gates; the historical scope in `docs/security-source-remediation.md` is unchanged). Contract: `docs/database-hardening-contract.md`.
+Database hardening runbook: `docs/database-hardening.md` (local-only status plus coordinated release gates). Contract: `docs/database-hardening-contract.md`.
 
 ## Testing and Offline Verification
 
@@ -148,6 +133,7 @@ in `playwright.config.ts` and `tests/fixtures/`; never paste a real secret anywh
 
 ```bash
 npm ci
+npx playwright install chromium
 npm run check
 npm run check:db
 ```

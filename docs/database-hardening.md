@@ -1,6 +1,6 @@
 # 資料庫強化 runbook（本機現況與正式發布門檻）
 
-本文件是技術 runbook，只描述本機現況與未來正式發布的條件。本次不執行正式 migration、部署、commit 或正式寫入。`docs/security-source-remediation.md` 是歷史 source-only 文件，保持原範圍，本文件不改寫它，也不宣稱過去項目已修復。
+本文件是技術 runbook，只描述本機現況與未來正式發布的條件。本次不執行正式 migration、部署、commit 或正式寫入。
 
 契約以 `docs/database-hardening-contract.md` 為準。實作細節看 `tests/database/README.md` 與 `scripts/local-stack/README.md`。`.omo/` 下的本機紀錄不進版控。
 

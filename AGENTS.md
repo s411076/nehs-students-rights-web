@@ -28,7 +28,7 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 ## Client state rules
 
 - localStorage is never authoritative; server receipts and reads decide displayed counts and voter state.
-- Uncertain outcomes reconcile via public reads, never mutation replay.
+- Only the user may resend an uncertain create, using the same idempotency key. Other uncertain outcomes reconcile via public reads.
 - Queue/tab counts describe the full query-matching population, not loaded rows. Unknown counts stay unknown, never zero.
 
 ## Data

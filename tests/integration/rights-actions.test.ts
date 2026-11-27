@@ -129,7 +129,15 @@ test('rejects malformed JSON without writes', async () => {
 test('caps streamed bytes despite lying Content-Length', async () => {
   const seeded = await actionRequest(studentCases[0]);
   seeded.headers.set('content-length', '1');
-  const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(65537)); controller.close(); } });
+  const json = JSON.stringify(studentCases[0]);
+  const bytes = new TextEncoder().encode(json + ' '.repeat(65537 - Buffer.byteLength(json)));
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 32768));
+      controller.enqueue(bytes.subarray(32768));
+      controller.close();
+    },
+  });
   expect((await POST(new NextRequest(seeded.url, { method: 'POST', headers: seeded.headers, body }))).status).toBe(413);
   expect(fixture.data.counters.total).toBe(0);
 });

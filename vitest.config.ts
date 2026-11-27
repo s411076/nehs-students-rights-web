@@ -6,7 +6,7 @@ export default defineConfig({
   oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'node',
-    include: ['tests/{unit,integration}/**/*.test.ts'],
+    include: ['tests/{unit,integration}/**/*.test.ts', 'tests/components/**/*.test.tsx'],
     unstubGlobals: true,
     restoreMocks: true,
   },

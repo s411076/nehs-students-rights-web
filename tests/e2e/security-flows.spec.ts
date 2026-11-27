@@ -283,3 +283,23 @@ test('logout failure hides privileges immediately and reports an explicit failur
   await expect(page.getByRole('link', { name: /後台管理/ })).toHaveCount(0);
   await capture(page, 'logout-failure');
 });
+
+test('student resends a pending proposal after its receipt is lost', async ({ page, context, request }) => {
+  await login(context, 'student');
+  await page.goto('/proposals');
+  await page.getByLabel('提案標題').fill('Lost receipt');
+  await page.getByLabel('寶貴意見內容').fill('Only one pending proposal');
+  await page.route('**/api/rights/actions', async route => {
+    expect((await route.fetch()).ok()).toBe(true);
+    await route.abort('failed');
+  }, { times: 1 });
+  const send = page.getByRole('button', { name: '送出提案' });
+  await send.click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('無法確認');
+  await capture(page, 'proposal-before-resend');
+  await send.click();
+  await expect(page.getByLabel('提案標題')).toHaveValue('');
+  const snapshot = await state(request);
+  expect(snapshot.rows('proposals').filter(row => row.content === 'Only one pending proposal')).toHaveLength(1);
+  expect(snapshot.requests.filter(entry => entry.path.endsWith('/rights_create_proposal'))).toHaveLength(2);
+});

@@ -19,6 +19,7 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 - CI `check`: `npm ci`, `npx playwright install --with-deps chromium`, then `npm run check`.
 - CI `check-db`: `docker pull supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`, then `npm run check:db`.
 - Update CI action pins: `gh actions-lock`, then `gh actions-lock --verify`.
+- Push (origin is the `woodengrass` fork; keychain helper has no token): `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -u origin <branch>`; open PRs with `gh pr create --repo s411076/nehs-students-rights-web --head woodengrass:<branch>`.
 - Wait for pull request CI: `gh pr checks <number> --repo s411076/nehs-students-rights-web --watch --fail-fast`.
 
 - `npm run test`, `npm run typecheck`, `npm run lint`.

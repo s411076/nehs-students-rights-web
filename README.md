@@ -1,135 +1,70 @@
 # NEHS Student Rights Website
 
-A campus website for student proposals, petitions, feedback, and announcements, built with Next.js App Router and Supabase.
+A campus website where students post proposals, sign petitions, send feedback and read announcements. Built with the Next.js App Router and Supabase.
 
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
-[![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node.js 22.22.2 minimum](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org) [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev) [![Node.js 22.22.2 minimum](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
-Traditional Chinese version: [中文版](./README.zh-TW.md)
+[中文版](./README.zh-TW.md)
 
-## Contents
+## Setup
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [Project Structure](#project-structure)
-- [Documentation](#documentation)
-- [Testing and Offline Verification](#testing-and-offline-verification)
+You need Node.js 22.22.2+, 24.15.0+ or 26.0.0+ (`nvm install` picks the version in `.nvmrc`), and a Supabase project's URL and publishable (anon) key.
 
-## Installation
-
-Prerequisites:
-
-- Node.js 22.22.2+ in the 22.x series, 24.15.0+ in the 24.x series, or 26.0.0 or later (required by the locked dependencies). Use `nvm install` to select the version in `.nvmrc`; the bundled npm is fine.
-- A Supabase project providing the project URL and publishable (anon) key. Local development and testing use only the public key, never the service-role key.
-
-Environment setup:
-
-1. Install dependencies: `npm ci`.
-2. Create `.env.local` in the project root (already covered by the `.env*` rule in `.gitignore`, so it never enters version control) with the following two public variables:
+Run `npm ci`, then create `.env.local` in the project root. It is already ignored by git.
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://你的專案.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=你的假publishable key
+NEXT_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-publishable-key>
 ```
 
-Only these two public variables, no other required variables. The repo has no `.env.example`, and none needs to be created. Never paste a real secret anywhere; the fake keys for testing already live in `playwright.config.ts` and `tests/fixtures/`.
+The app reads only these two variables. Never use the service-role key, and never paste a real secret into the repository.
 
-## Quick Start
+## Commands
 
-Common commands (see `package.json`):
-
-| Command | Purpose |
+| Command | What it does |
 | --- | --- |
-| `npm run dev` | Start the dev server (http://localhost:3000) |
-| `npm run build` | Production build (see below, offline prefix required, never run bare) |
+| `npm run dev` | Start the dev server at http://localhost:3000 |
+| `npm run check` | Typecheck, lint, Vitest, offline production build, then Playwright |
+| `npm run check:db` | Apply all migrations and run the SQL checks on a fresh local PostgreSQL in Docker (pull the image first; see `AGENTS.md`) |
+| `npm run build` | Production build. Needs the offline variables below when run locally |
 | `npm run start` | Start the production server |
-| `npm run lint` | ESLint check |
-| `npm run test` | All Vitest unit and integration tests |
-| `npm run test:watch` | Vitest watch mode |
-| `npm run test:e2e` | Playwright end-to-end tests |
-| `npm run typecheck` | `tsc --noEmit` type check |
+| `npm run test` | Vitest unit, component and integration tests |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:e2e` | Playwright browser tests |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
 
-Verification order before release:
-
-```bash
-npm ci
-npm run test
-npm run typecheck
-npm run lint
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
-npx playwright install chromium
-npm run test:e2e
-```
-
-`build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
-
-## How It Works
-
-**Moderation stays inline, with no separate backend page.** Administrators reply to, delete, and look up feedback authors on `/feedback`; proposal approval/rejection, status/reply editing, comment deletion, and author lookup stay on `/proposals`. Home-section creation/deletion stays on `/`. `/admin` and its feedback-list API have been removed and return 404.
-
-**Server-first identity verification.** Every request re-verifies with `getUser()` against the Auth server, accepting only confirmed full-domain `nehs.hc.edu.tw` addresses (`lib/auth/server.ts`); admin identity calls the caller-only `rights_is_admin` RPC, without enumerating the membership table. The database checks current school eligibility and protected, uniquely constrained administrator membership. `proxy.ts` only forwards refreshes, with no authorization caching.
-
-**All writes go through a 13-action POST allowlist.** `POST /api/rights/actions` (`lib/rights/server-actions.ts`) accepts only 4 student actions (`createProposal`, `createFeedback`, `addComment`, `setVote`) and 9 admin actions (proposal review, comment deletion, reply saving, announcement management, and more); the request body is parsed strictly with `parseActionRequest`, with the request Origin, JSON media type, and the 65536-byte limit all enforced inside the guards. `setVote` is desired-state and idempotent: historical votes stay an immutable baseline and new ballots start per user, so totals never rewrite history and old ledgers are never double-counted. Each mutation derives a UUID and records display attribution privately in the database.
-
-**Public reads get bounded RPC pages only; anonymous reads get no names.** Every list reads through a bounded `Page<T>` RPC (`lib/rights/server-reads.ts`, default `p_limit=20`, max 50) instead of raw table selects, with `PUBLIC_STATUSES` filtering for public proposals; public feedback omits `author_name` for anonymous rows before serialization, and admin lists stay redacted too. Identifying an anonymous author requires the separate guarded `rights_admin_author` lookup behind the server admin gate, returning `known` only for reliably attributed new rows while unknown historical ownership stays unknown. The profile page never queries proposals (`app/profile/page.tsx`), and the profile proposal list remains intentionally unavailable.
-
-**This branch requires a coordinated database and application release.** The earlier hardening release is recorded in `docs/database-hardening.md §7`; this task does not deploy the newer status-collapse or filtered-queue migrations. Fresh local test databases execute the ordered chain in `scripts/database/migrations.mjs`; existing deployments must apply only missing versions after checking migration history. Save editor drafts, drain writes during maintenance, apply the missing migrations and matching application, then smoke-test before reopening writes. See `docs/database-hardening.md §5a` for rollback limitations and `docs/database-hardening-contract.md` for the contract.
-
-**Queue counts cover all matching records, not just loaded pages.** `/api/rights/queue` filters before pagination and returns exact tab counts plus the selected total. Awaiting feedback and pending proposals are oldest-first; other queues are newest-first. Each batch loads 20 rows (API maximum 50), with no cap on how many batches can be opened. Failed counts remain unknown rather than appearing as zero.
-
-**Votes use server state, with no automatic retries.** Per-proposal single-flight in `app/proposals/ProposalVote.tsx` complements database serialization and unique ballots. Receipts and public-state reads determine the displayed count and caller's vote; localStorage is not authoritative. Uncertain outcomes show「無法確認是否已儲存，請先更新清單確認，勿重複提交。」and trigger read reconciliation, never mutation replay. OAuth retains the browser SDK's PKCE exchange followed by `getUser` verification; baseline headers remain in `next.config.ts`.
-
-## Project Structure
+## Project structure
 
 ```text
-app/
-  page.tsx               Home: proposal search, feedback list, announcements
-  proposals/page.tsx     Proposal list, comments, petition votes
-  feedback/page.tsx      Anonymous feedback
-  profile/page.tsx       Profile page (verified identity only, no proposal queries)
-  auth/callback/page.tsx OAuth callback completion page
-  api/rights/
-    actions/route.ts     13-action POST allowlist
-    feedback/route.ts    Public feedback reads
-    proposals/pending/   Admin pending-review reads
-    session/route.ts     Generation-guarded session verification
-components/
-  AuthProvider.tsx       Generation-guarded identity provider
-  Navbar.tsx             Synced identity, fail-closed logout
-  admin/                 Guarded inline author lookup
-lib/
-  auth/                  Server verification, types, OAuth completion
-  rights/                Contracts, validation, projections, server actions, RPC reads, client
-  supabase/              request-scoped server client
-  supabase.ts            Browser singleton factory
-proxy.ts                 Refresh forwarding and static exclusions
-tests/
-  unit/                  Contracts and server verification
-  components/            Per-page security behavior
-  integration/           Routes, headers, session boundaries
-  e2e/                   Real-browser security flows
-  fixtures/              Offline fake provider, font mock
-docs/
-  database-hardening.md           Local DB hardening status and release gates (not deployed)
-  database-hardening-contract.md  RPC, read, and mutation contract for the hardening work
+app/                         Pages: home, /proposals, /feedback, /profile, /auth/callback
+app/api/rights/
+  actions/                   Every write goes here (4 student and 9 admin actions)
+  feedback/, proposals/      Public lists
+  proposals/[id]/comments/   Comments on one proposal
+  items/                     One public item by ID
+  home-sections/             Home page announcements
+  queue/                     Filtered lists with a total for each tab
+  proposals/pending/         Proposals waiting for review (admin only)
+  authors/                   Who wrote an anonymous item (admin only)
+  session/                   Current user and whether they are an admin
+components/                  UI components
+lib/auth/                    Server-side sign-in checks
+lib/rights/                  Contracts, validation, reads and writes
+supabase/migrations/         Database migrations, applied in filename order
+tests/                       Unit, component, integration, e2e and SQL tests
+docs/                        Database runbook and RPC contract
 ```
 
-## Documentation
+There is no `/admin` page. Admins moderate directly on `/feedback` and `/proposals`, and manage announcements on `/`.
 
-Database hardening runbook: `docs/database-hardening.md` (local-only status plus coordinated release gates). Contract: `docs/database-hardening-contract.md`.
+## Database changes
 
-## Testing and Offline Verification
+Before deploying a new migration, check the production migration history and apply only the versions that are missing. The procedure is in `docs/database-hardening.md` and the RPC contract in `docs/database-hardening-contract.md`.
 
-The default `npm run test` and `npm run test:e2e` suites run against a loopback fake Auth/PostgREST provider with fixture users.
-No real Supabase account, Google login, or production secret is needed for them.
-Optional real-PostgreSQL and real-PostgREST authorization gates are documented
-separately in `docs/database-hardening.md` and are not part of the default suite.
-The Playwright config starts the fake provider and a real Next.js server automatically
-and binds them directly to loopback ports 4174 and 4173. Browser and server traffic must stay
-offline from production Supabase. Use only the fake publishable key already wired
-in `playwright.config.ts` and `tests/fixtures/`; never paste a real secret anywhere.
+## Testing
+
+Integration and browser tests talk to a fake Auth/PostgREST server on localhost (`tests/fixtures/`), so you do not need a Supabase account or any secret. Before opening a pull request, run:
 
 ```bash
 npm ci
@@ -138,26 +73,17 @@ npm run check
 npm run check:db
 ```
 
-`build` must never run bare: static prerendering of `/auth/callback`
-triggers the fail-closed browser factory (it throws when public config is
-missing), so a bare `npm run build` failing there is expected behavior, not a
-regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and
-mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole
-build offline. All keys are fixture fakes, with no real secrets.
-
-Targeted invocations (no duplicate `--run`):
+Running `npm run build` on its own fails on purpose: prerendering `/auth/callback` throws when the Supabase variables are missing, so a misconfigured build never ships. `npm run check` builds with fake values pointed at an unused local port and mocked Google Fonts. To run only that build:
 
 ```bash
-npm run test -- tests/unit/rights-contracts.test.ts
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+```
+
+To run a single test file:
+
+```bash
 npm run test -- tests/integration/rights-actions.test.ts
-npm run test:e2e -- --grep 'security headers'
 npm run test:e2e -- tests/e2e/security-flows.spec.ts
 ```
 
-The suite index is `tests/BEHAVIORS.md`. Route tests use a single simulated provider;
-SQL grants, RLS, projection and mutation semantics are checked on real PostgreSQL
-by `npm run check:db`. The offline production build alone is:
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
-```
+`tests/BEHAVIORS.md` lists what each test covers.

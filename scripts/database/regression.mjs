@@ -74,6 +74,10 @@ const voter = (n) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 function vote(user, value, delay = 0) {
   return `BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${user}'; SELECT public.rights_set_vote('${proposal}',${value}); SELECT 'rights_lock_held'; SELECT pg_sleep(${delay}); COMMIT;`;
 }
+const createKey = '40000000-0000-4000-8000-000000000001';
+const create = `SET ROLE authenticated; SET request.jwt.claim.sub='${voter(1)}'; SELECT public.rights_create_proposal('${createKey}','Concurrent create','body','其他');`;
+await Promise.all(Array.from({ length: 8 }, () => concurrent(create)));
+sql(db, `SELECT rights_test.assert((SELECT count(*) FROM public.proposals WHERE client_key='${createKey}')=1,'concurrent creates insert once');`);
 await Promise.all(Array.from({ length: 8 }, () => concurrent(vote(voter(1), true))));
 sql(db, `DO $$ BEGIN IF (SELECT count(*) FROM rights_private.proposal_ballots WHERE proposal_id='${proposal}')<>1 THEN RAISE EXCEPTION 'Duplicate concurrent votes'; END IF; END $$;`);
 await Promise.all(Array.from({ length: 6 }, (_, n) => concurrent(vote(voter(n + 1), true))));

@@ -48,7 +48,7 @@ function redacted(item) {
 }
 try {
   const proposal = await check('createProposal returns exact versioned receipt', async () => created(
-    await success('studentA', 'create_proposal', { p_title: marker, p_content: 'Synthetic pending body', p_category: '其他' }), 'proposal'));
+    await success('studentA', 'create_proposal', { p_client_key: crypto.randomUUID(), p_title: marker, p_content: 'Synthetic pending body', p_category: '其他' }), 'proposal'));
   await check('pending proposal is absent from public targeted read', async () => {
     assert.equal(await success('anon', 'get_public_item', { p_kind: 'proposal', p_id: proposal }), null);
   });
@@ -58,15 +58,15 @@ try {
     cleanup.find(row => row.id === proposal).version = 2;
   });
   const feedback = await check('anonymous feedback creation derives identity in DB', async () => created(
-    await success('studentA', 'create_feedback', { p_title: `${marker} title`, p_content: 'Synthetic anonymous body',
+    await success('studentA', 'create_feedback', { p_client_key: crypto.randomUUID(), p_title: `${marker} title`, p_content: 'Synthetic anonymous body',
       p_category: '其他', p_is_anonymous: true }), 'feedback'));
-  const bodyMatch = created(await success('studentB', 'create_feedback', { p_title: 'Synthetic body match',
+  const bodyMatch = created(await success('studentB', 'create_feedback', { p_client_key: crypto.randomUUID(), p_title: 'Synthetic body match',
     p_content: marker, p_category: '其他', p_is_anonymous: true }), 'feedback');
-  created(await success('studentB', 'create_feedback', { p_title: `noise-${randomUUID()}`,
+  created(await success('studentB', 'create_feedback', { p_client_key: crypto.randomUUID(), p_title: `noise-${randomUUID()}`,
     p_content: 'Synthetic unrelated newest item', p_category: '其他', p_is_anonymous: false }), 'feedback');
   const comment = await check('anonymous comment creation returns exact receipt', async () => created(
-    await success('studentA', 'add_comment', { p_proposal_id: proposal, p_content: 'Synthetic anonymous comment', p_is_anonymous: true }), 'comment'));
-  const secondComment = created(await success('studentB', 'add_comment', { p_proposal_id: proposal,
+    await success('studentA', 'add_comment', { p_client_key: crypto.randomUUID(), p_proposal_id: proposal, p_content: 'Synthetic anonymous comment', p_is_anonymous: true }), 'comment'));
+  const secondComment = created(await success('studentB', 'add_comment', { p_client_key: crypto.randomUUID(), p_proposal_id: proposal,
     p_content: 'Synthetic second comment', p_is_anonymous: false }), 'comment');
   for (const actor of ['anon', 'studentB', 'admin']) {
     await check(`public feedback remains anonymous for ${actor}`, async () => {
@@ -141,7 +141,7 @@ try {
   for (const [name, args, status, code] of [
     ['update_proposal_control', { p_id: proposal, p_status: '處理中', p_reply: 'Stale', p_expected_version: 2 }, 409, 'PT409'],
     ['approve_proposal', { p_id: proposal, p_expected_version: 3 }, 409, 'PT409'],
-    ['create_proposal', { p_title: 'Synthetic invalid', p_content: 'Body', p_category: 'invalid' }, 400, 'PT400'],
+    ['create_proposal', { p_client_key: crypto.randomUUID(), p_title: 'Synthetic invalid', p_content: 'Body', p_category: 'invalid' }, 400, 'PT400'],
     ['set_vote', { p_proposal_id: randomUUID(), p_voted: true }, 409, 'PT409'],
     ['delete_comment', { p_id: comment, p_proposal_id: historical, p_expected_version: 1 }, 409, 'PT409'],
     ['list_public_feedback', { p_limit: 51 }, 400, 'PT400'],

@@ -402,4 +402,3 @@ SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
 SELECT rights_test.assert(jsonb_array_length(public.rights_list_pending_proposals()->'items')=20,'admin pending page size');
 SELECT rights_test.assert(jsonb_array_length(public.rights_list_admin_feedback()->'items')=20,'admin feedback page size');
 RESET ROLE;
-SELECT rights_test.assert(false, 'CI proof');

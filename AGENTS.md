@@ -16,6 +16,10 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 
 - `npm run check`: typecheck, lint, Vitest, offline production build and Playwright (loopback ports 4173/4174).
 - `npm run check:db`: apply the migration chain and run SQL gates on a fresh Docker PostgreSQL cluster using the cached Supabase image.
+- CI `check`: `npm ci`, `npx playwright install --with-deps chromium`, then `npm run check`.
+- CI `check-db`: `docker pull supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`, then `npm run check:db`.
+- Update CI action pins: `gh actions-lock`, then `gh actions-lock --verify`.
+- Wait for pull request CI: `gh pr checks <number> --repo s411076/nehs-students-rights-web --watch --fail-fast`.
 
 - `npm run test`, `npm run typecheck`, `npm run lint`.
 - Never run `npm run build` bare: static prerender of `/auth/callback` is fail-closed without public config. Use the offline prefix in README (loopback URL, fixture keys, `tests/fixtures/google-fonts.cjs`).

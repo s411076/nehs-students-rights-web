@@ -23,6 +23,15 @@ INSERT INTO auth.users(id,email,email_confirmed_at,raw_user_meta_data,banned_unt
  ('10000000-0000-4000-8000-000000000016','deleted@nehs.hc.edu.tw',now(),'{}',NULL,false,now()),
  ('10000000-0000-4000-8000-000000000017','spoof@nehs.hc.edu.tw.evil.invalid',now(),'{}',NULL,false,NULL);
 INSERT INTO public.admins(email) VALUES ('admin-synthetic@nehs.hc.edu.tw');
+CREATE FUNCTION rights_test.session_id(p_user uuid) RETURNS uuid LANGUAGE sql IMMUTABLE AS $$
+  SELECT ('30000000' || substring(p_user::text FROM 9))::uuid
+$$;
+CREATE FUNCTION rights_test.claims(p_user uuid) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
+  SELECT jsonb_build_object('sub',p_user,'session_id',rights_test.session_id(p_user))
+$$;
+INSERT INTO auth.sessions(id,user_id)
+SELECT rights_test.session_id(id),id FROM auth.users
+WHERE id::text LIKE '10000000-0000-4000-8000-%';
 -- SQL execute grants and the identity checks inside a definer are separate boundaries.
 DO $$
 DECLARE f record;
@@ -41,6 +50,70 @@ INSERT INTO public.proposals(id,title,content,status,author_name,is_anonymous,up
  ('20000000-0000-4000-8000-000000000003','synthetic legacy','synthetic content','legacy-invalid','Untrusted synthetic',true,0,0);
 INSERT INTO public.endorsements(user_id,target_id,target_type) VALUES
  ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','proposal');
+
+SAVEPOINT session_checks;
+SELECT rights_test.claims('10000000-0000-4000-8000-000000000001') AS student_claims,
+       rights_test.claims('10000000-0000-4000-8000-000000000010') AS admin_claims \gset
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO :'student_claims';
+SELECT rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)->'voted'='true',
+  'live session can vote');
+SELECT rights_test.assert(public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001')->'viewer_voted'='true',
+  'live session sees its vote');
+SET LOCAL request.jwt.claims TO :'admin_claims';
+SELECT rights_test.assert(public.rights_is_admin(),'live admin session identifies admin');
+RESET ROLE;
+DELETE FROM auth.sessions WHERE id IN (
+  (:'student_claims'::jsonb->>'session_id')::uuid, (:'admin_claims'::jsonb->>'session_id')::uuid);
+UPDATE auth.sessions SET not_after=now()-interval '1 second' WHERE user_id='10000000-0000-4000-8000-000000000002';
+SET LOCAL ROLE anon;
+SET LOCAL request.jwt.claims TO '{}';
+SELECT public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001') AS guest_item \gset
+SELECT rights_test.assert(:'guest_item'::jsonb->'viewer_voted'='false','guest can read proposal without vote personalization');
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO :'student_claims';
+DO $$
+DECLARE
+  student uuid := '10000000-0000-4000-8000-000000000001';
+  admin_id uuid := '10000000-0000-4000-8000-000000000010';
+  active_user uuid := '10000000-0000-4000-8000-000000000003';
+  probe record; caught text; failures text[] := '{}';
+BEGIN
+  IF (public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001')->'viewer_voted'='false'
+      AND public.rights_list_public_proposals(p_query=>'synthetic concurrency')->'items'->0->'viewer_voted'='false'
+      AND public.rights_queue_page('proposal','all',p_query=>'synthetic concurrency')->'items'->0->'viewer_voted'='false') IS NOT TRUE THEN
+    failures := array_append(failures,'revoked session public vote state differs from guest');
+  END IF;
+  FOR probe IN SELECT * FROM (VALUES
+    ('revoked student',rights_test.claims(student),false),
+    ('revoked admin',rights_test.claims(admin_id),true),
+    ('missing session claim',jsonb_build_object('sub',active_user),false),
+    ('malformed session claim',jsonb_build_object('sub',active_user,'session_id','invalid'),false),
+    ('expired session',rights_test.claims('10000000-0000-4000-8000-000000000002'),false),
+    ('other user session',jsonb_build_object('sub',student,'session_id',rights_test.session_id(active_user)),false)
+  ) probes(label,claims,is_admin) LOOP
+    PERFORM set_config('request.jwt.claims',probe.claims::text,true);
+    caught := 'allowed';
+    BEGIN
+      IF probe.is_admin THEN
+        PERFORM public.rights_create_home_section(gen_random_uuid(),'revoked admin','body');
+      ELSE
+        PERFORM public.rights_set_vote('20000000-0000-4000-8000-000000000001',true);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS caught=RETURNED_SQLSTATE;
+    END;
+    IF caught <> 'PT401' THEN
+      failures := array_append(failures,probe.label || ' ' || caught);
+    END IF;
+    IF probe.is_admin AND public.rights_is_admin() THEN
+      failures := array_append(failures,'revoked admin still recognized');
+    END IF;
+  END LOOP;
+  PERFORM rights_test.assert(cardinality(failures)=0,array_to_string(failures,', '));
+END $$;
+ROLLBACK TO SAVEPOINT session_checks;
+RELEASE SAVEPOINT session_checks;
 
 DO $$
 DECLARE t text; r text; f record; c record;

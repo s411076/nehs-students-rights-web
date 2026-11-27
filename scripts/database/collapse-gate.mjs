@@ -25,7 +25,10 @@ function docker(args, input, stage = 'docker') {
   if (result.status !== 0) {
     const state = result.stderr?.match(/ERROR:\s+([A-Z0-9]{5})/u)?.[1] ?? 'LOCAL_PROCESS';
     const line = result.stderr?.match(/psql:<stdin>:(\d+):/u)?.[1] ?? 'unknown';
-    throw new Error(`${stage} failed (${state}, input line ${line}); raw output withheld`);
+    const assertion = stage === 'full SQL regression'
+      ? result.stderr?.match(/ERROR:\s+P0001: Regression assertion: ([A-Za-z0-9 ,_-]+)/u)?.[1]
+      : undefined;
+    throw new Error(`${stage} failed (${state}, input line ${line}${assertion ? `, assertion: ${assertion}` : ''}); raw output withheld`);
   }
   return (result.stdout ?? '').trim();
 }
@@ -124,7 +127,7 @@ try {
     throw new Error('Exact status mapping counts failed');
   }
   sql(database, file('tests/database/managed-principal.sql'), 'supabase_admin', 'post-migration effective privileges');
-  sql(database, `BEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`, 'supabase_admin', 'full SQL regression');
+  sql(database, `\\set VERBOSITY verbose\nBEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`, 'supabase_admin', 'full SQL regression');
   sql(database, file('tests/database/queues.sql'), 'supabase_admin', 'filtered queue totals and gating');
   await checkConcurrency(container, database, sql);
   writeFileSync(resolve(root, 'tests/database/verification-collapse.json'), `${JSON.stringify({

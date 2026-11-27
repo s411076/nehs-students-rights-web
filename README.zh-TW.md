@@ -4,7 +4,7 @@
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node >= 20](https://img.shields.io/badge/Node-%3E%3D20-green)](https://nodejs.org)
+[![Node.js 最低版本為 22.22.2](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
 English version: [English](./README.md)
 
@@ -21,7 +21,7 @@ English version: [English](./README.md)
 
 前置需求：
 
-- Node.js 20.9 以上（Next.js 16 需要），npm 隨附即可。
+- Node.js 22.x（22.22.2 以上）、24.x（24.15.0 以上），或 26.0.0 以上（鎖定的相依套件所需）。可執行 `nvm install` 選用 `.nvmrc` 指定的版本，使用隨附的 npm 即可。
 - 一個 Supabase 專案，提供專案 URL 與 publishable（anon）key。本機開發與測試只用公開 key，從不使用 service-role key。
 
 環境設定：
@@ -59,6 +59,7 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
@@ -135,6 +136,7 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 

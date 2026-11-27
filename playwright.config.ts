@@ -1,16 +1,9 @@
 import { defineConfig } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-if (!process.env.HARNESS_APP_URL || !process.env.FIXTURE_URL) {
-  const ports = spawnSync(process.execPath, [resolve('tests/fixtures/ports.mjs')], { encoding: 'utf8' });
-  if (ports.status !== 0) throw new TypeError(ports.stderr);
-  const [appPort, fixturePort] = ports.stdout.trim().split(',').map(Number);
-  process.env.HARNESS_APP_URL = `http://127.0.0.1:${appPort}`;
-  process.env.FIXTURE_URL = `http://127.0.0.1:${fixturePort}`;
-}
-const baseURL = process.env.HARNESS_APP_URL;
-const fixtureURL = process.env.FIXTURE_URL;
+const baseURL = 'http://localhost:4173';
+const fixtureURL = 'http://127.0.0.1:4174';
+process.env.FIXTURE_URL = fixtureURL;
 const appPort = new URL(baseURL).port;
 const fixturePort = new URL(fixtureURL).port;
 const env = {
@@ -28,10 +21,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: [['list'], ['./tests/fixtures/evidence-reporter.ts']],
+  reporter: 'list',
   timeout: 60_000,
-  outputDir: '.omo/evidence/source-security-remediation/task-1/playwright',
-  use: { baseURL, trace: 'on', serviceWorkers: 'block' },
+  use: { baseURL, trace: 'retain-on-failure', serviceWorkers: 'block' },
   webServer: [
     { command: `node --experimental-strip-types tests/fixtures/run-supabase.mjs`, env: { ...env, FIXTURE_PORT: String(fixturePort) }, url: `${fixtureURL}/__fixture/health`, reuseExistingServer: false },
     { command: `npm run dev -- --hostname 127.0.0.1 --port ${appPort}`, env, url: baseURL, reuseExistingServer: false, timeout: 120_000 },

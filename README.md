@@ -62,7 +62,7 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_pub
 npm run test:e2e
 ```
 
-`build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix above pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
+`build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
 
 `lint` currently reports 3 errors and 5 warnings (exit 1), all pre-existing (callback `Link`, `AuthProvider` effect, and existing warnings; down from the 12-error, 5-warning historical repair baseline); acknowledge it, do not mislabel it as passing. Security boundaries and residual risks are described in `docs/security-source-remediation.md`.
 
@@ -142,23 +142,20 @@ No real Supabase account, Google login, or production secret is needed for them.
 Optional real-PostgreSQL and real-PostgREST authorization gates are documented
 separately in `docs/database-hardening.md` and are not part of the default suite.
 The Playwright config starts the fake provider and a real Next.js server automatically
-and pins them to ephemeral loopback ports. Browser and server traffic must stay
+and binds them directly to loopback ports 4174 and 4173. Browser and server traffic must stay
 offline from production Supabase. Use only the fake publishable key already wired
 in `playwright.config.ts` and `tests/fixtures/`; never paste a real secret anywhere.
 
 ```bash
 npm ci
-npm run test
-npm run typecheck
-npm run lint
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
-npm run test:e2e
+npm run check
+npm run check:db
 ```
 
 `build` must never run bare: static prerendering of `/auth/callback`
 triggers the fail-closed browser factory (it throws when public config is
 missing), so a bare `npm run build` failing there is expected behavior, not a
-regression. The prefix above pins config to the useless loopback (port 9) and
+regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and
 mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole
 build offline. All keys are fixture fakes, with no real secrets.
 
@@ -166,14 +163,15 @@ Targeted invocations (no duplicate `--run`):
 
 ```bash
 npm run test -- tests/unit/rights-contracts.test.ts
-npm run test -- tests/integration/rights-actions.test.ts tests/integration/rights-reads.test.ts
+npm run test -- tests/integration/rights-actions.test.ts
 npm run test:e2e -- --grep 'security headers'
 npm run test:e2e -- tests/e2e/security-flows.spec.ts
 ```
 
-Notes: the fake provider is intentionally permissive, so a denied request in tests
-proves the application guard blocked it, not the database. Real-database evidence
-comes only from the separate gates in `docs/database-hardening.md`. `lint` currently reports
-3 errors and 5 warnings (exit 1), all pre-existing (down from the 12-error, 5-warning
-historical repair baseline); identify it, do not mislabel it as passing. Security boundaries and residual risks are described
-in `docs/security-source-remediation.md`.
+The suite index is `tests/BEHAVIORS.md`. Route tests use a single simulated provider;
+SQL grants, RLS, projection and mutation semantics are checked on real PostgreSQL
+by `npm run check:db`. The offline production build alone is:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+```

@@ -148,7 +148,6 @@ anonymous feedback/comment, pagination, browser, or deployment verification.
 
 ```sh
 node tests/real/workflow.http.mjs "$STATE"
-node tests/real/launcher.http.mjs "$STATE"
 ```
 
 These are explicit scripts, not normal npm/Vitest tests. The workflow uses the

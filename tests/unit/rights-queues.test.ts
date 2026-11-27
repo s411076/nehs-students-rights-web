@@ -48,10 +48,10 @@ describe('queue parameter boundary', () => {
     expect(parseQueueParameters(params(query)).ok).toBe(false);
   });
   it('keeps microsecond cursor precision and query bounds', () => {
-    const cursor = encodeURIComponent(JSON.stringify({ created_at: '2026-03-02T00:00:00.123456Z', id: 'feedback-1' }));
+    const cursor = encodeURIComponent(JSON.stringify({ created_at: '2026-03-02T00:00:00.123456Z', id: '20000000-0000-4000-8000-000000000001' }));
     const parsed = parseQueueParameters(params(`kind=feedback&filter=awaiting&limit=7&cursor=${cursor}&query=needle`));
     expect(parsed).toEqual({ ok: true, data: { p_kind: 'feedback', p_filter: 'awaiting', p_limit: 7,
-      p_cursor: { created_at: '2026-03-02T00:00:00.123456Z', id: 'feedback-1' }, p_query: 'needle' } });
+      p_cursor: { created_at: '2026-03-02T00:00:00.123456Z', id: '20000000-0000-4000-8000-000000000001' }, p_query: 'needle' } });
   });
 });
 

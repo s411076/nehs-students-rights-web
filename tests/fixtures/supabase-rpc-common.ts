@@ -55,3 +55,10 @@ export function versioned(row: Row, expected: unknown) {
 export function recordWrite(data: FixtureData, kind: 'insert' | 'update' | 'delete') {
   data.counters[kind]++; data.counters.total++;
 }
+
+export function uuid(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(value)) {
+    throw new FixtureRpcError(400, 'Invalid UUID');
+  }
+  return value.toLowerCase();
+}

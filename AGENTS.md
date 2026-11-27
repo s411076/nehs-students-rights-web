@@ -14,6 +14,9 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 
 ## Commands
 
+- `npm run check`: typecheck, lint, Vitest, offline production build and Playwright (loopback ports 4173/4174).
+- `npm run check:db`: apply the migration chain and run SQL gates on a fresh Docker PostgreSQL cluster using the cached Supabase image.
+
 - `npm run test`, `npm run typecheck`, `npm run lint`.
 - Never run `npm run build` bare: static prerender of `/auth/callback` is fail-closed without public config. Use the offline prefix in README (loopback URL, fixture keys, `tests/fixtures/google-fonts.cjs`).
 - Tests run against a loopback fake Auth/PostgREST provider. No real Supabase account or secret is needed; fixture fakes live only in `playwright.config.ts` and `tests/fixtures/`. Never paste a real secret anywhere.

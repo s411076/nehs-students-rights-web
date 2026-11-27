@@ -78,7 +78,7 @@ node tests/real/boundary.http.mjs "$STATE"
 絕不在此任務部署正式。正式套用是未來獨立協調切換，必須與相容網站同版進行；
 migration 與網站是同一部署單位，不可各自獨立上線。
 
-- 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse → filtered queues → keyed creates），
+- 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse → filtered queues → keyed creates → live sessions），
   `regression.mjs`、`managed-principal.mjs` 與 `stack.mjs apply` 都依序套用整鏈。前兩者計算並記錄 SHA-256；
   只有 `stack.mjs apply` 逐檔比對呼叫者提供的 SHA-256，拒絕單檔子集套用。用法為 `apply STATE SHA1 SHA2...`（每檔一個已完成雜湊）。
   這是全新測試資料庫的規則；正式環境依 migration history 只套尚未執行的版本，不重跑第 7 節已完成的 hardening。
@@ -94,6 +94,19 @@ migration 與網站是同一部署單位，不可各自獨立上線。
   確認 smoke 通過後才重開寫入。
 - 回滾：維持維護狀態，從切換前已驗證的備份復原並配對舊網站，或採經驗證的前向修復，不單獨回滾 app。狀態合併不可逆，不能靠將已結案改回某個舊值恢復原決議；任何情況都不做 DISABLE RLS、broad grant 或手動改 status 回舊值。
   若 collapse 交易失敗即完整 rollback（`ON_ERROR_STOP=1`），事後驗證無殘留物件、筆數不變、history 未登記該版本。
+
+## 5b. RPC 工作階段撤銷（可獨立發布）
+
+在 keyed creates 之後套用 `supabase/migrations/20261128030334_rights_live_sessions.sql`：
+SHA-256 `14cec0d277e7327e619a4f40409d0b5cf0fbc64869be6362890c79c85435a347`。
+這是純資料庫 migration，可獨立於網站部署；RPC 簽章、回應格式與網站登出流程均不變。
+直接呼叫 RPC 時，缺少、已刪除或已過期的 session 視同未登入：需要身分的 RPC 回 PT401，
+`rights_is_admin` 回 false，公開讀取維持可用且不回傳個人投票狀態。
+
+`@supabase/auth-js` 2.117.1 的 `getUser()` 呼叫 `GET /auth/v1/user`。GoTrue 的
+[該路由](https://github.com/supabase/auth/blob/0725a1d90cd9fbbb2a26f3baf18afd400a436f66/internal/api/api.go#L287-L294)
+已透過 [session lookup](https://github.com/supabase/auth/blob/0725a1d90cd9fbbb2a26f3baf18afd400a436f66/internal/api/auth.go#L172-L187)
+對已刪除的 session 回 403 `session_not_found`；網站將其視為未登入。這次補上的是 PostgREST 直接呼叫的 SQL 驗證。
 
 ## 6. 剩餘缺口（準確列出）
 

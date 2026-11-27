@@ -30,8 +30,10 @@ CREATE FUNCTION rights_test.claims(p_user uuid) RETURNS jsonb LANGUAGE sql IMMUT
   SELECT jsonb_build_object('sub',p_user,'session_id',rights_test.session_id(p_user))
 $$;
 INSERT INTO auth.sessions(id,user_id)
-SELECT rights_test.session_id(id),id FROM auth.users
-WHERE id::text LIKE '10000000-0000-4000-8000-%';
+SELECT rights_test.session_id(id),id
+FROM generate_series(1,17) AS n
+CROSS JOIN LATERAL (SELECT ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid AS id) AS fixture
+WHERE n<=6 OR n>=10;
 -- SQL execute grants and the identity checks inside a definer are separate boundaries.
 DO $$
 DECLARE f record;
@@ -52,6 +54,7 @@ INSERT INTO public.endorsements(user_id,target_id,target_type) VALUES
  ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','proposal');
 
 SAVEPOINT session_checks;
+UPDATE auth.sessions SET not_after=now()+interval '1 hour' WHERE user_id='10000000-0000-4000-8000-000000000010';
 SELECT rights_test.claims('10000000-0000-4000-8000-000000000001') AS student_claims,
        rights_test.claims('10000000-0000-4000-8000-000000000010') AS admin_claims \gset
 SET LOCAL ROLE authenticated;
@@ -68,8 +71,8 @@ DELETE FROM auth.sessions WHERE id IN (
 UPDATE auth.sessions SET not_after=now()-interval '1 second' WHERE user_id='10000000-0000-4000-8000-000000000002';
 SET LOCAL ROLE anon;
 SET LOCAL request.jwt.claims TO '{}';
-SELECT public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001') AS guest_item \gset
-SELECT rights_test.assert(:'guest_item'::jsonb->'viewer_voted'='false','guest can read proposal without vote personalization');
+SELECT rights_test.assert(public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001')->'viewer_voted'='false',
+  'guest can read proposal without vote personalization');
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims TO :'student_claims';
 DO $$
@@ -128,7 +131,9 @@ BEGIN
     END LOOP;
   END LOOP;
   FOR f IN SELECT p.*,n.nspname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='rights_private' OR (n.nspname='public' AND p.proname LIKE 'rights\_%' ESCAPE '\') LOOP
-    PERFORM rights_test.assert(f.proowner=CASE WHEN f.oid='rights_private.user_identity(uuid)'::regprocedure THEN 'postgres'::regrole ELSE 'rights_executor'::regrole END,'isolated function owner with exact identity exception');
+    PERFORM rights_test.assert(f.proowner=CASE WHEN f.oid IN ('rights_private.user_identity(uuid)'::regprocedure,
+      'rights_private.live_session_user()'::regprocedure) THEN 'postgres'::regrole ELSE 'rights_executor'::regrole END,
+      'isolated function owner with exact Auth lookup exceptions');
     PERFORM rights_test.assert(f.proconfig @> ARRAY['search_path=""'],'empty search_path');
     PERFORM rights_test.assert(NOT EXISTS (SELECT 1 FROM aclexplode(f.proacl) WHERE grantee=0),'no PUBLIC execute');
   END LOOP;
@@ -137,9 +142,11 @@ BEGIN
     PERFORM rights_test.assert(NOT has_schema_privilege(r,'rights_private','USAGE,CREATE'),'JWT private schema denied');
     PERFORM rights_test.assert(NOT has_table_privilege(r,'rights_private.create_receipts','SELECT,INSERT,UPDATE,DELETE,TRUNCATE'),'JWT receipt ledger denied');
     PERFORM rights_test.assert(NOT has_function_privilege(r,'rights_private.user_identity(uuid)','EXECUTE'),'JWT helper denied');
+    PERFORM rights_test.assert(NOT has_function_privilege(r,'rights_private.live_session_user()','EXECUTE'),'JWT session helper denied');
     PERFORM rights_test.assert(NOT pg_has_role(r,'rights_executor','SET'),'JWT cannot assume executor');
   END LOOP;
   PERFORM rights_test.assert(NOT has_any_column_privilege('rights_executor','auth.users','SELECT'),'executor has no direct Auth SELECT');
+  PERFORM rights_test.assert(NOT has_any_column_privilege('rights_executor','auth.sessions','SELECT'),'executor has no direct session SELECT');
   PERFORM rights_test.assert(NOT has_schema_privilege('rights_executor','public','CREATE'),'temporary public CREATE removed');
   PERFORM rights_test.assert(NOT pg_has_role('rights_executor','postgres','SET'),'executor cannot assume postgres');
   PERFORM rights_test.assert(NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname='rights_executor'),'executor cannot bypass RLS');
@@ -148,6 +155,9 @@ BEGIN
   PERFORM rights_test.assert(f.prosecdef AND f.provolatile='s' AND f.proretset AND f.prorettype='record'::regtype
     AND f.proargnames=ARRAY['p_id','email','email_confirmed_at','banned_until','deleted_at','is_anonymous','display_name']
     AND f.proallargtypes=ARRAY['uuid'::regtype::oid,'text'::regtype::oid,'timestamptz'::regtype::oid,'timestamptz'::regtype::oid,'timestamptz'::regtype::oid,'boolean'::regtype::oid,'text'::regtype::oid], 'narrow stable identity contract');
+  SELECT * INTO f FROM pg_proc WHERE oid='rights_private.live_session_user()'::regprocedure;
+  PERFORM rights_test.assert(f.prosecdef AND f.provolatile='s' AND NOT f.proretset AND f.prorettype='uuid'::regtype,
+    'narrow stable session contract');
   PERFORM rights_test.assert(NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.endorsements'::regclass AND NOT tgisinternal),'only verified counters retired');
 END $$;
 
@@ -179,26 +189,27 @@ RESET ROLE;
 SET ROLE authenticated;
 SELECT rights_test.throws($q$SELECT * FROM rights_private.user_identity('10000000-0000-4000-8000-000000000001')$q$,'42501');
 DO $$
-DECLARE t text; n integer;
+DECLARE t text; n integer; u uuid;
+  forged jsonb := '{"email":"admin-synthetic@nehs.hc.edu.tw","user_metadata":{"role":"admin","email_verified":true}}';
 BEGIN
   FOREACH t IN ARRAY ARRAY['admins','endorsements','feedback','feedbacks','home_sections','profiles','proposal_comments','proposals','votes'] LOOP
     PERFORM rights_test.throws(format('SELECT * FROM public.%I',t),'42501');
     PERFORM rights_test.throws(format('DELETE FROM public.%I',t),'42501');
   END LOOP;
-  PERFORM set_config('request.jwt.claim.sub','',false);
+  PERFORM set_config('request.jwt.claims','{}',false);
   PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他')$q$,'PT401');
   FOREACH n IN ARRAY ARRAY[11,12,13,15,16,17] LOOP
-    PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-'||lpad(n::text,12,'0'),false);
-    PERFORM set_config('request.jwt.claims','{"email":"admin-synthetic@nehs.hc.edu.tw","user_metadata":{"role":"admin","email_verified":true}}',false);
+    u := ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid;
+    PERFORM set_config('request.jwt.claims',(rights_test.claims(u)||forged)::text,false);
     PERFORM rights_test.assert(NOT public.rights_is_admin(),'ineligible admin denied');
     PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他')$q$,'PT403');
     PERFORM rights_test.throws($q$SELECT public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)$q$,'PT403');
     PERFORM rights_test.throws($q$SELECT public.rights_create_home_section(gen_random_uuid(),'x','body')$q$,'PT403');
   END LOOP;
-  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000014',false);
+  PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000014')::text,false);
   PERFORM rights_test.assert((public.rights_create_proposal(gen_random_uuid(),'expired ban','body','其他')->>'inserted')::boolean,'expired ban permits mutation');
+  PERFORM set_config('request.jwt.claims',(rights_test.claims('10000000-0000-4000-8000-000000000001')||forged)::text,false);
 END $$;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
 SELECT rights_test.assert(NOT public.rights_is_admin(),'student not admin despite forged claims');
 DO $$
 DECLARE call text; id uuid := '20000000-0000-4000-8000-000000000001';
@@ -226,16 +237,16 @@ BEGIN
   receipt:=public.rights_create_proposal(k,'retry','body','其他');
   PERFORM rights_test.assert(public.rights_create_proposal(k,'retry','body','其他')=receipt,'same receipt on resend');
   PERFORM rights_test.throws(format('SELECT public.rights_create_proposal(%L,%L,%L,%L)',k,'retry','changed','其他'),'PT409');
-  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000002',true);
+  PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000002')::text,true);
   PERFORM rights_test.assert(public.rights_create_proposal(k,'retry','body','其他')->>'id'<>receipt->>'id','caller-scoped key');
-  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
+  PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000001')::text,true);
 END $$;
 
 -- Every create wrapper participates, including after an admin changes the row version.
 DO $$
 DECLARE k uuid:=gen_random_uuid(); first_receipt jsonb; repeated jsonb; call text;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000010',true);
+  PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000010')::text,true);
   FOREACH call IN ARRAY ARRAY[
     'rights_create_feedback($1,''retry'',$2,''其他'',true)',
     'rights_add_comment($1,''20000000-0000-4000-8000-000000000001'',$2,true)',
@@ -249,18 +260,18 @@ BEGIN
     PERFORM rights_test.assert(repeated=first_receipt, call || ': replay original receipt');
     PERFORM rights_test.throws('SELECT public.' || replace(replace(call,'$1',quote_literal(k)),'$2',quote_literal('changed')), 'PT409');
   END LOOP;
-  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
+  PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000001')::text,true);
 END $$;
 
 -- Commit the create and delete separately to model a lost create response.
 SELECT gen_random_uuid() AS removed_create_key \gset
 SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_receipt \gset
 COMMIT;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SET request.jwt.claims TO :'admin_claims';
 SELECT rights_test.assert(public.rights_delete_proposal(
   (:'removed_create_receipt'::jsonb->>'id')::uuid,1)->>'deleted'='true','admin removed the committed proposal');
 BEGIN;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+SET request.jwt.claims TO :'student_claims';
 SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_resend \gset
 RESET ROLE;
 SELECT rights_test.assert(NOT EXISTS (
@@ -316,7 +327,7 @@ BEGIN
       DECLARE tmp text[]:=args;
       BEGIN
         tmp[i]:='NULL::'||format_type(f.proargtypes[i-1],NULL);
-        PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000010',false);
+        PERFORM set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000010')::text,false);
         PERFORM rights_test.throws(format('SELECT public.%I(%s)',f.proname,array_to_string(tmp,',')),'PT400');
       END;
     END LOOP;
@@ -343,7 +354,7 @@ BEGIN
   PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),123,'body','其他')$q$,'42883');
 END $$;
 
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SET request.jwt.claims TO :'admin_claims';
 DO $$
 DECLARE j jsonb; p uuid; f uuid; c uuid; h uuid;
 BEGIN
@@ -387,10 +398,10 @@ RESET ROLE;
 UPDATE auth.users SET banned_until=now()+interval '1 day' WHERE id='10000000-0000-4000-8000-000000000001';
 UPDATE auth.users SET email=U&'\3000' || E'\tADMIN-SYNTHETIC@NEHS.HC.EDU.TW\r\n' || U&'\00A0' WHERE id='10000000-0000-4000-8000-000000000010';
 SET ROLE authenticated;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SET request.jwt.claims TO :'admin_claims';
 SELECT rights_test.assert(public.rights_is_admin(),'admin membership uses lower ECMAScript-trimmed full-domain caller email');
 SELECT rights_test.assert(public.rights_admin_author('feedback',current_setting('rights_test.feedback_id')::uuid)->>'email'='student-1@nehs.hc.edu.tw','later banned target author remains identifiable');
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+SET request.jwt.claims TO :'student_claims';
 SELECT rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'banned after attribution','body','其他')$q$,'PT403');
 RESET ROLE;
 UPDATE auth.users SET banned_until=NULL,raw_user_meta_data=jsonb_build_object('full_name',repeat('🏫',201),'private_secret','never return metadata') WHERE id='10000000-0000-4000-8000-000000000001';
@@ -422,6 +433,7 @@ INSERT INTO public.home_sections(id,title,content,created_at)
 SELECT ('60000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'synthetic-pagination','synthetic body','2026-01-01T00:00:00.123456Z' FROM generate_series(1,1107) n;
 
 SET ROLE anon;
+RESET request.jwt.claims;
 DO $$
 DECLARE page jsonb; cursor jsonb; ids uuid[]; j jsonb; kind text; expected integer; count_synthetic integer; loops integer;
   previous_time timestamptz; previous_id uuid;
@@ -471,7 +483,7 @@ BEGIN
 END $$;
 RESET ROLE;
 SET ROLE authenticated;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SET request.jwt.claims TO :'admin_claims';
 SELECT rights_test.assert(jsonb_array_length(public.rights_list_pending_proposals()->'items')=20,'admin pending page size');
 SELECT rights_test.assert(jsonb_array_length(public.rights_list_admin_feedback()->'items')=20,'admin feedback page size');
 RESET ROLE;

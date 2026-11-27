@@ -3,7 +3,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { credentials, users } from './identities.mjs';
+import { credentials, sessionId, users } from './identities.mjs';
 import { verifyMigrationChain } from '../database/migrations.mjs';
 
 const source = 'database-recovery-parity-20261016';
@@ -58,7 +58,8 @@ if (command === 'up') {
     sql(state.db, `INSERT INTO auth.users(id,email,aud,role,email_confirmed_at,raw_user_meta_data,raw_app_meta_data)
       VALUES ('${user.id}','${user.email}','authenticated','authenticated',
       ${user.email_confirmed_at ? `'${user.email_confirmed_at}'` : 'NULL'},
-      '${JSON.stringify(user.user_metadata)}','{"provider":"fixture"}');`);
+      '${JSON.stringify(user.user_metadata)}','{"provider":"fixture"}');
+      INSERT INTO auth.sessions(id,user_id) VALUES ('${sessionId(user)}','${user.id}');`);
   }
   sql(state.db, `INSERT INTO public.admins(email) VALUES ('${users.admin.email}');
     INSERT INTO public.proposals(id,user_id,title,content,status,author_name,author_email,upvotes_count)

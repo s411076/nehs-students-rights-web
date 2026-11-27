@@ -27,7 +27,8 @@ export async function checkConcurrency(container, database, sql) {
     });
   }
 
-  const create = `SET ROLE authenticated; SET request.jwt.claim.sub='${voter(1)}';
+  const create = `SET ROLE authenticated;
+    SELECT set_config('request.jwt.claims',rights_test.claims('${voter(1)}')::text,false) \\gset
     SELECT public.rights_create_proposal('${createKey}','Concurrent create','body','其他');`;
   const receipts = await Promise.all(Array.from({ length: 8 }, () => concurrent(create)));
   const persisted = sql(database, `SELECT jsonb_build_object('inserted',true,'id',id,'version',content_version)
@@ -40,7 +41,8 @@ export async function checkConcurrency(container, database, sql) {
   console.log('PASS: 8 concurrent same-key creates persisted one proposal and returned identical receipts');
 
   function vote(user, value) {
-    return `BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${user}';
+    return `BEGIN; SET LOCAL ROLE authenticated;
+      SELECT set_config('request.jwt.claims',rights_test.claims('${user}')::text,true) \\gset
       SELECT public.rights_set_vote('${proposal}',${value});`;
   }
   function checkBallots(expected, message) {

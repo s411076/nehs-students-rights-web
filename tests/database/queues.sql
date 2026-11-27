@@ -96,9 +96,9 @@ SET ROLE anon;
 SELECT rights_test.throws($q$SELECT public.rights_queue_page('pending','pending',20,NULL,'queue-probe-proposal')$q$,'PT401');
 RESET ROLE;
 SET ROLE authenticated;
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+SELECT set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000001')::text,false);
 SELECT rights_test.throws($q$SELECT public.rights_queue_page('pending','pending',20,NULL,'queue-probe-proposal')$q$,'PT403');
-SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SELECT set_config('request.jwt.claims',rights_test.claims('10000000-0000-4000-8000-000000000010')::text,false);
 SELECT rights_test.throws($q$SELECT public.rights_queue_page('pending','all',20,NULL,'queue-probe-proposal')$q$,'PT400');
 DO $$
 DECLARE page jsonb; cursor jsonb:=NULL; ids uuid[]:='{}'; j jsonb; loops integer:=0; seen integer:=0;

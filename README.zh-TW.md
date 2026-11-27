@@ -2,86 +2,36 @@
 
 學生提案、連署、意見回饋與公告的校內網站，以 Next.js App Router 加 Supabase 打造。
 
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
-[![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node.js 最低版本為 22.22.2](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org) [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev) [![Node.js 最低版本為 22.22.2](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
 English version: [English](./README.md)
 
-## Contents
+## 安裝
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [Project Structure](#project-structure)
-- [Documentation](#documentation)
-- [測試與離線驗證](#測試與離線驗證)
+前置需求：Node.js 22.22.2 以上（22.x）、24.15.0 以上（24.x），或 26.0.0 以上（見 `.nvmrc`），以及一個提供專案 URL 與 publishable（anon）key 的 Supabase 專案。
 
-## Installation
-
-前置需求：
-
-- Node.js 22.x（22.22.2 以上）、24.x（24.15.0 以上），或 26.0.0 以上（鎖定的相依套件所需）。可執行 `nvm install` 選用 `.nvmrc` 指定的版本，使用隨附的 npm 即可。
-- 一個 Supabase 專案，提供專案 URL 與 publishable（anon）key。本機開發與測試只用公開 key，從不使用 service-role key。
-
-環境設定：
-
-1. 複製相依套件並安裝：`npm ci`。
-2. 在專案根目錄建立 `.env.local`（已在 `.gitignore` 的 `.env*` 規則內，不會進版控），填入以下兩個公開變數：
-
+1. 執行 `npm ci`，再於專案根目錄建立 `.env.local`（已在 `.gitignore` 內，不會進版控），內容如下：
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://你的專案.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=你的假publishable key
+NEXT_PUBLIC_SUPABASE_URL=https://<你的專案>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<你的專案-publishable-key>
 ```
+應用程式只讀取這兩個變數（`lib/supabase.ts`、`lib/supabase/server.ts`）。倉庫內沒有 `.env.example`。絕不使用 service-role key，也不要在任何地方貼上真實 secret。
 
-只有這兩個公開變數，沒有其他必填變數。倉庫內沒有 `.env.example`，也不需要建立。任何地方都不要貼上真實 secret，測試用的假 key 已經寫在 `playwright.config.ts` 與 `tests/fixtures/` 裡。
-
-## Quick Start
-
-常用指令（以 `package.json` 為準）：
+## 快速開始
 
 | 指令 | 用途 |
 | --- | --- |
 | `npm run dev` | 啟動開發伺服器（http://localhost:3000） |
-| `npm run build` | 正式建置（見下方，一定需要離線前綴，不可裸跑） |
+| `npm run check` | 型別檢查、Lint、Vitest、離線正式建置、Playwright |
+| `npm run check:db` | 在全新的本機 Docker PostgreSQL 上執行 migration 與 SQL 檢查（需要 Docker 與快取的 Supabase image；pull 指令見 `AGENTS.md`） |
+| `npm run build` | 正式建置——不可裸跑（見下方） |
 | `npm run start` | 啟動正式伺服器 |
 | `npm run lint` | ESLint 檢查 |
-| `npm run test` | Vitest 全部單元與整合測試 |
+| `npm run test` | 全部 Vitest 單元與整合測試 |
 | `npm run test:watch` | Vitest 監看模式 |
 | `npm run test:e2e` | Playwright 端對端測試 |
 | `npm run typecheck` | `tsc --noEmit` 型別檢查 |
-
-發布前的驗證順序：
-
-```bash
-npm ci
-npm run test
-npm run typecheck
-npm run lint
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
-npx playwright install chromium
-npm run test:e2e
-```
-
-`build` 不可裸跑：`/auth/callback` 靜態預渲染會觸發 fail-closed 的瀏覽器 factory（缺公開設定即拋錯），裸 `npm run build` 在此失敗是預期行為，不是回歸。上面的前綴把設定釘到無用的 loopback（port 9）並用 `tests/fixtures/google-fonts.cjs` mock Google Fonts，讓 build 全程離線。全是夾具假 key，不含真實 secret。
-
-## How It Works
-
-**管理功能直接留在公開頁面，不另設後台。**管理員在 `/feedback` 回覆、刪除建言及查詢作者；在 `/proposals` 核可／退回提案、編輯狀態與回覆、刪除留言及查詢作者。首頁區塊的新增／刪除留在 `/`。`/admin` 及其建言列表 API 已移除，造訪會回傳 404。
-
-**伺服器優先驗證身分。**每次請求都用 `getUser()` 向 Auth 伺服器重新驗證，只接受已確認的 `nehs.hc.edu.tw` 完整 domain（`lib/auth/server.ts`）；管理員身分改走只回答呼叫者資格的 `rights_is_admin` RPC，不列舉管理員名單。資料庫檢查目前學校資格及受保護、具有唯一約束的管理員紀錄。`proxy.ts` 只做 refresh 傳遞，不做授權快取。
-
-**所有寫入走 13 個動作的 POST allowlist。**`POST /api/rights/actions`（`lib/rights/server-actions.ts`）只接受 4 個學生動作（`createProposal`、`createFeedback`、`addComment`、`setVote`）與 9 個管理動作（提案審核、留言刪除、回覆儲存、公告管理等），請求體用 `parseActionRequest` 精確解析，來源 Origin、JSON 媒體型別與 65536 位元組上限都在守衛內。`setVote` 是 desired-state 且冪等：歷史票維持不可變 baseline，新票從每人空 ballots 開始，總數不改寫歷史，舊帳不重複計數。每次寫入都在資料庫衍生 UUID 並私下記錄顯示歸屬。
-
-**公開讀取只給有界 RPC 分頁，匿名不給名字。**所有列表都經有界 `Page<T>` RPC 讀取（`lib/rights/server-reads.ts`，預設 `p_limit=20`、上限 50），不再直接掃表，公開提案另加 `PUBLIC_STATUSES` 過濾；公開意見回饋的匿名列在序列化前省略 `author_name`，管理員列表同樣維持遮蔽。要識別匿名作者須走伺服器管理 gate 之後的專用 `rights_admin_author` 查詢，只有可靠歸屬的新列才回 `known`，未知的歷史擁有權維持未知。個人頁完全不查提案（`app/profile/page.tsx`），個人提案列表維持刻意不提供。
-
-**本分支必須協調發布資料庫與網站。**先前 hardening 的發布紀錄見 `docs/database-hardening.md §7`；本次任務不部署新的狀態收斂或篩選佇列 migration。全新測試資料庫執行 `scripts/database/migrations.mjs` 的有序鏈，既有環境則核對 migration history 後只套缺少的版本。先保存編輯草稿、維護停寫並等待進行中操作完成，再套用缺少的 migration 與配對網站，通過 smoke 後才重開寫入。回滾限制見 `docs/database-hardening.md §5a`，契約見 `docs/database-hardening-contract.md`。
-
-**分頁數字代表全部符合條件的資料，不是已載入筆數。**`/api/rights/queue` 先篩選再分頁，回傳各分頁的真正總數；待回覆建言與待審核提案從最舊開始，其他清單從最新開始。每批載入 20 筆（API 上限 50），可持續載入更多，沒有總筆數上限。計數失敗顯示未知，不會誤報為 0。
-
-**投票以伺服器狀態為準，不自動重試。**`app/proposals/ProposalVote.tsx` 的每提案 single-flight 配合資料庫序列化與唯一票紀錄。畫面依收據及公開狀態查詢顯示票數與本人投票狀態，不把 localStorage 當權威。不確定結果顯示「無法確認是否已儲存，請先更新清單確認，勿重複提交。」後只查詢核對，不自動重送寫入。OAuth 保留瀏覽器 SDK 的 PKCE 交換及後續 `getUser` 驗證；基礎 headers 維持在 `next.config.ts`。
-
-## Project Structure
+## 專案結構
 
 ```text
 app/
@@ -91,70 +41,40 @@ app/
   profile/page.tsx       個人頁（只顯示已驗證身分，不查提案）
   auth/callback/page.tsx OAuth 回調完成頁
   api/rights/
-    actions/route.ts     13 動作 POST allowlist
+    actions/route.ts     全部寫入：13 個動作的 POST allowlist
+    authors/route.ts     僅管理員的作者歸屬查詢
     feedback/route.ts    公開回饋讀取
-    proposals/pending/   管理員待審核讀取
-    session/route.ts     世代守衛的 session 驗證
-components/
-  AuthProvider.tsx       世代守衛的身分 provider
-  Navbar.tsx             同步身分、fail-closed 登出
-  admin/                 受管理員驗證保護的行內作者查詢
-lib/
-  auth/                  伺服器驗證、型別、OAuth 完成
-  rights/                契約、校驗、投影、伺服器動作、RPC 讀取、客戶端
-  supabase/              request-scoped 伺服器 client
-  supabase.ts            瀏覽器 singleton factory
-proxy.ts                 refresh 傳遞與靜態排除
-tests/
-  unit/                  契約與伺服器驗證
-  components/            各頁安全行為
-  integration/           路由、headers、session 邊界
-  e2e/                   真機瀏覽器安全流程
-  fixtures/              離線假 provider、字型 mock
-docs/
-  database-hardening.md           本機資料庫強化現況與發布門檻（尚未上線）
-  database-hardening-contract.md  強化工作的 RPC、讀取與寫入契約
+    home-sections/route.ts 首頁公告讀取
+    items/route.ts       單筆公開項目查詢
+    proposals/route.ts   公開提案讀取
+    proposals/pending/route.ts 管理員待審核讀取
+    proposals/[id]/comments/route.ts 單一提案的留言
+    queue/route.ts       先篩選再分頁的佇列與正確分頁總數
+    session/route.ts     已驗證身分加管理員旗標
 ```
 
-## Documentation
+## 文件
 
-資料庫修復的本機現況與正式發布門檻：[資料庫強化 runbook](./docs/database-hardening.md)。契約：[資料庫強化契約](./docs/database-hardening-contract.md)。
+所有 migration 皆已套用至正式環境。部署新的 migration 前，請先比對 migration history，只套用缺少的版本；步驟見 `docs/database-hardening.md`，契約見 `docs/database-hardening-contract.md`。
 
 ## 測試與離線驗證
 
-預設的 `npm run test` 與 `npm run test:e2e` 跑在 loopback 假 Auth/PostgREST provider 加夾具使用者上。
-這兩個預設套件不需要真實 Supabase 帳號、Google 登入或正式 secret。
-選用的真實 PostgreSQL 與真實 PostgREST 授權 gate 另寫在 `docs/database-hardening.md`，不是預設套件的一部分。
-The Playwright config starts the fake provider and a real Next.js server automatically
-and pins them to ephemeral loopback ports. Browser and server traffic must stay
-offline from production Supabase. Use only the fake publishable key already wired
-in `playwright.config.ts` and `tests/fixtures/`; never paste a real secret anywhere.
-
+`npm run test` 與 `npm run test:e2e` 跑在 loopback 假 Auth/PostgREST provider 上（已接好在 `playwright.config.ts` 與 `tests/fixtures/`），不需要真實 Supabase 帳號或 secret。發布前依序執行：
 ```bash
 npm ci
-npm run test
-npm run typecheck
-npm run lint
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
 npx playwright install chromium
-npm run test:e2e
+npm run check
+npm run check:db
 ```
 
-`build` 不可裸跑：`/auth/callback` 靜態預渲染會觸發 fail-closed 的瀏覽器
-factory（缺公開設定即拋錯），裸 `npm run build` 在此失敗是預期行為，不是回歸。
-上面的前綴把設定釘到無用的 loopback（port 9）並用
-`tests/fixtures/google-fonts.cjs` mock Google Fonts，讓 build 全程離線。
-全是夾具假 key，不含真實 secret。
+`build` 不可裸跑：`/auth/callback` 靜態預渲染使用 fail-closed factory，缺少公開設定即拋錯，因此裸 `npm run build` 在此失敗是預期行為。`npm run check` 改跑以下離線建置（loopback URL 加 `tests/fixtures/google-fonts.cjs` 字型 mock，全是夾具 key）：
+```bash
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+```
 
-Targeted invocations (no duplicate `--run`):
-
+指定測試（總索引：`tests/BEHAVIORS.md`；SQL 授權、RLS 與投影語意由 `npm run check:db` 覆蓋）：
 ```bash
 npm run test -- tests/unit/rights-contracts.test.ts
-npm run test -- tests/integration/rights-actions.test.ts tests/integration/rights-reads.test.ts
-npm run test:e2e -- --grep 'security headers'
+npm run test -- tests/integration/rights-actions.test.ts
 npm run test:e2e -- tests/e2e/security-flows.spec.ts
 ```
-
-Notes: the fake provider is intentionally permissive, so a denied request in tests
-proves the application guard blocked it, not the database. Real-database evidence
-comes only from the separate gates in `docs/database-hardening.md`.

@@ -50,6 +50,7 @@ BEGIN
   PERFORM rights_test.assert(NOT has_schema_privilege('authenticated','rights_private','USAGE'),'private schema denied');
   FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
     PERFORM rights_test.assert(NOT has_schema_privilege(r,'rights_private','USAGE,CREATE'),'JWT private schema denied');
+    PERFORM rights_test.assert(NOT has_table_privilege(r,'rights_private.create_receipts','SELECT,INSERT,UPDATE,DELETE,TRUNCATE'),'JWT receipt ledger denied');
     PERFORM rights_test.assert(NOT has_function_privilege(r,'rights_private.user_identity(uuid)','EXECUTE'),'JWT helper denied');
     PERFORM rights_test.assert(NOT pg_has_role(r,'rights_executor','SET'),'JWT cannot assume executor');
   END LOOP;
@@ -86,7 +87,7 @@ BEGIN
 END $$;
 SELECT rights_test.assert(NOT public.rights_is_admin(),'anon is not admin');
 SELECT rights_test.throws($q$ SELECT public.rights_admin_author('proposal','20000000-0000-4000-8000-000000000001') $q$,'42501');
-SELECT rights_test.throws($q$ SELECT public.rights_create_proposal('x','body','其他') $q$,'42501');
+SELECT rights_test.throws($q$ SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他') $q$,'42501');
 SELECT rights_test.throws($q$ SELECT public.increment_endorsement('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001') $q$,'42501');
 RESET ROLE;
 
@@ -100,17 +101,17 @@ BEGIN
     PERFORM rights_test.throws(format('DELETE FROM public.%I',t),'42501');
   END LOOP;
   PERFORM set_config('request.jwt.claim.sub','',false);
-  PERFORM rights_test.throws($q$SELECT public.rights_create_proposal('x','body','其他')$q$,'PT401');
+  PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他')$q$,'PT401');
   FOREACH n IN ARRAY ARRAY[11,12,13,15,16,17] LOOP
     PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-'||lpad(n::text,12,'0'),false);
     PERFORM set_config('request.jwt.claims','{"email":"admin-synthetic@nehs.hc.edu.tw","user_metadata":{"role":"admin","email_verified":true}}',false);
     PERFORM rights_test.assert(NOT public.rights_is_admin(),'ineligible admin denied');
-    PERFORM rights_test.throws($q$SELECT public.rights_create_proposal('x','body','其他')$q$,'PT403');
+    PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他')$q$,'PT403');
     PERFORM rights_test.throws($q$SELECT public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)$q$,'PT403');
-    PERFORM rights_test.throws($q$SELECT public.rights_create_home_section('x','body')$q$,'PT403');
+    PERFORM rights_test.throws($q$SELECT public.rights_create_home_section(gen_random_uuid(),'x','body')$q$,'PT403');
   END LOOP;
   PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000014',false);
-  PERFORM rights_test.assert((public.rights_create_proposal('expired ban','body','其他')->>'inserted')::boolean,'expired ban permits mutation');
+  PERFORM rights_test.assert((public.rights_create_proposal(gen_random_uuid(),'expired ban','body','其他')->>'inserted')::boolean,'expired ban permits mutation');
 END $$;
 SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
 SELECT rights_test.assert(NOT public.rights_is_admin(),'student not admin despite forged claims');
@@ -123,16 +124,46 @@ SELECT rights_test.throws($q$UPDATE public.proposals SET upvotes_count=999 WHERE
 SELECT rights_test.throws($q$SELECT rights_private.actor(true)$q$,'42501');
 
 DO $$
+DECLARE k uuid:=gen_random_uuid(); receipt jsonb;
+BEGIN
+  receipt:=public.rights_create_proposal(k,'retry','body','其他');
+  PERFORM rights_test.assert(public.rights_create_proposal(k,'retry','body','其他')=receipt,'same receipt on resend');
+  PERFORM rights_test.throws(format('SELECT public.rights_create_proposal(%L,%L,%L,%L)',k,'retry','changed','其他'),'PT409');
+  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000002',true);
+  PERFORM rights_test.assert(public.rights_create_proposal(k,'retry','body','其他')->>'id'<>receipt->>'id','caller-scoped key');
+  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
+END $$;
+
+-- Commit the create and delete separately to model a lost create response.
+SELECT gen_random_uuid() AS removed_create_key \gset
+SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_receipt \gset
+COMMIT;
+SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SELECT rights_test.assert(public.rights_delete_proposal(
+  (:'removed_create_receipt'::jsonb->>'id')::uuid,1)->>'deleted'='true','admin removed the committed proposal');
+BEGIN;
+SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_resend \gset
+RESET ROLE;
+SELECT rights_test.assert(NOT EXISTS (
+  SELECT 1 FROM public.proposals WHERE title='[其他] removed before resend'
+),'resending a deleted proposal does not insert a replacement');
+SELECT rights_test.assert(:'removed_create_resend'::jsonb=:'removed_create_receipt'::jsonb,'resend after deletion returns the original receipt');
+SET ROLE authenticated;
+SELECT rights_test.throws(format('SELECT public.rights_create_proposal(%L,%L,%L,%L)',
+  :'removed_create_key','removed before resend','changed','其他'),'PT409');
+
+DO $$
 DECLARE j jsonb; c uuid; f uuid; p uuid;
 BEGIN
-  j:=public.rights_create_proposal(repeat('🏫',100),repeat('🏫',5000),'其他'); p:=(j->>'id')::uuid;
+  j:=public.rights_create_proposal(gen_random_uuid(),repeat('🏫',100),repeat('🏫',5000),'其他'); p:=(j->>'id')::uuid;
   PERFORM rights_test.assert(j->>'version'='1','create version');
-  j:=public.rights_create_feedback('',repeat('🏫',16),'其他',true); f:=(j->>'id')::uuid;
+  j:=public.rights_create_feedback(gen_random_uuid(),'',repeat('🏫',16),'其他',true); f:=(j->>'id')::uuid;
   PERFORM set_config('rights_test.feedback_id',f::text,false);
   j:=public.rights_get_public_item('feedback',f);
   PERFORM rights_test.assert(j->>'title'=repeat('🏫',15)||'...' AND NOT j ? 'author_name','unicode feedback fallback and anonymity');
   PERFORM rights_test.assert(NOT (j ?| ARRAY['user_id','email','author_email','user_email','attribution_trusted']),'no identity fields');
-  j:=public.rights_add_comment('20000000-0000-4000-8000-000000000001','anonymous synthetic comment',true); c:=(j->>'id')::uuid;
+  j:=public.rights_add_comment(gen_random_uuid(),'20000000-0000-4000-8000-000000000001','anonymous synthetic comment',true); c:=(j->>'id')::uuid;
   j:=public.rights_list_public_comments('20000000-0000-4000-8000-000000000001');
   PERFORM rights_test.assert(EXISTS(SELECT 1 FROM jsonb_array_elements(j->'items') x WHERE x->>'id'=c::text AND x->>'author_name'='匿名學生' AND NOT x ? 'user_id'),'anonymous comment redaction');
   PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)->>'upvotes_count'='38','baseline plus new vote not legacy ledger');
@@ -141,7 +172,7 @@ BEGIN
   PERFORM rights_test.assert(j->>'version'='1' AND j->>'viewer_voted'='true' AND j->>'legacy_upvotes_count'='37','vote/comment no version bump');
   PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',false)->>'upvotes_count'='37','cancel baseline floor');
   PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',false)->>'upvotes_count'='37','repeat cancel baseline floor');
-  PERFORM rights_test.throws($q$SELECT public.rights_add_comment('20000000-0000-4000-8000-000000000002','pending',false)$q$,'PT409');
+  PERFORM rights_test.throws($q$SELECT public.rights_add_comment(gen_random_uuid(),'20000000-0000-4000-8000-000000000002','pending',false)$q$,'PT409');
   PERFORM rights_test.throws($q$SELECT public.rights_set_vote('20000000-0000-4000-8000-000000000003',true)$q$,'PT409');
 END $$;
 
@@ -153,7 +184,7 @@ BEGIN
     args:='{}';
     FOR i IN 1..f.pronargs LOOP
       expression:=CASE f.proargnames[i]
-        WHEN 'p_limit' THEN '20' WHEN 'p_cursor' THEN 'NULL::jsonb'
+        WHEN 'p_client_key' THEN 'gen_random_uuid()' WHEN 'p_limit' THEN '20' WHEN 'p_cursor' THEN 'NULL::jsonb'
         WHEN 'p_query' THEN quote_literal('') WHEN 'p_kind' THEN quote_literal('proposal')
         WHEN 'p_expected_version' THEN '1::bigint' WHEN 'p_voted' THEN 'true' WHEN 'p_is_anonymous' THEN 'false'
         WHEN 'p_category' THEN quote_literal('其他') WHEN 'p_status' THEN quote_literal('處理中')
@@ -173,12 +204,12 @@ BEGIN
     END LOOP;
   END LOOP;
   statements:=ARRAY[
-    $q$SELECT public.rights_create_proposal(repeat('🏫',101),'body','其他')$q$,
-    $q$SELECT public.rights_create_proposal('x',repeat('🏫',5001),'其他')$q$,
-    $q$SELECT public.rights_create_proposal('　','body','其他')$q$,
-    $q$SELECT public.rights_create_proposal('x','body','invalid')$q$,
-    $q$SELECT public.rights_create_feedback('x','body','其他',NULL)$q$,
-    $q$SELECT public.rights_add_comment('20000000-0000-4000-8000-000000000001',repeat('🏫',1001),false)$q$,
+    $q$SELECT public.rights_create_proposal(gen_random_uuid(),repeat('🏫',101),'body','其他')$q$,
+    $q$SELECT public.rights_create_proposal(gen_random_uuid(),'x',repeat('🏫',5001),'其他')$q$,
+    $q$SELECT public.rights_create_proposal(gen_random_uuid(),'　','body','其他')$q$,
+    $q$SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','invalid')$q$,
+    $q$SELECT public.rights_create_feedback(gen_random_uuid(),'x','body','其他',NULL)$q$,
+    $q$SELECT public.rights_add_comment(gen_random_uuid(),'20000000-0000-4000-8000-000000000001',repeat('🏫',1001),false)$q$,
     $q$SELECT public.rights_list_public_proposals(0)$q$,
     $q$SELECT public.rights_list_public_proposals(51)$q$,
     $q$SELECT public.rights_list_public_proposals(20,'{}')$q$,
@@ -191,7 +222,7 @@ BEGIN
   FOREACH expression IN ARRAY statements LOOP PERFORM rights_test.throws(expression,'PT400'); END LOOP;
   PERFORM rights_test.throws($q$SELECT public.rights_set_vote('20000000-0000-4000-8000-000000000001','not-a-boolean')$q$,'22P02');
   PERFORM rights_test.throws($q$SELECT public.rights_get_public_item('proposal','not-a-uuid')$q$,'22P02');
-  PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(123,'body','其他')$q$,'42883');
+  PERFORM rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),123,'body','其他')$q$,'42883');
 END $$;
 
 SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
@@ -203,7 +234,7 @@ BEGIN
   PERFORM rights_test.assert(j->>'attribution'='known' AND j->>'user_id'='10000000-0000-4000-8000-000000000001' AND j->>'email'='student-1@nehs.hc.edu.tw','admin identifies another verified anonymous author only through lookup');
   j:=public.rights_admin_author('proposal','20000000-0000-4000-8000-000000000003');
   PERFORM rights_test.assert(j= jsonb_build_object('attribution','legacy_unverified','user_id',NULL,'email',NULL,'display_name',NULL),'legacy never trusted');
-  j:=public.rights_create_feedback('private attribution','synthetic secret content','其他',true); f:=(j->>'id')::uuid;
+  j:=public.rights_create_feedback(gen_random_uuid(),'private attribution','synthetic secret content','其他',true); f:=(j->>'id')::uuid;
   j:=public.rights_get_public_item('feedback',f);
   PERFORM rights_test.assert(NOT j ? 'author_name','public DTO redacted even for admin');
   j:=public.rights_admin_author('feedback',f);
@@ -211,7 +242,7 @@ BEGIN
   PERFORM rights_test.assert(public.rights_save_feedback_reply(f,'🏫 reply',1)->>'version'='2','feedback reply version');
   PERFORM rights_test.throws(format('SELECT public.rights_save_feedback_reply(%L,''stale draft'',1)',f),'PT409');
   PERFORM public.rights_delete_feedback(f,2);
-  j:=public.rights_create_proposal('moderation','synthetic content','其他'); p:=(j->>'id')::uuid;
+  j:=public.rights_create_proposal(gen_random_uuid(),'moderation','synthetic content','其他'); p:=(j->>'id')::uuid;
   PERFORM rights_test.assert(public.rights_approve_proposal(p,1)->>'version'='2','approve increments version');
   PERFORM rights_test.throws(format('SELECT public.rights_reject_proposal(%L,1)',p),'PT409');
   PERFORM rights_test.throws(format('SELECT public.rights_reject_proposal(%L,2)',p),'PT409');
@@ -219,16 +250,16 @@ BEGIN
   PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''處理中'',repeat(''🏫'',5001),2)',p),'PT400');
   PERFORM rights_test.assert(public.rights_update_proposal_control(p,'處理中','final',2)->>'version'='3','control version');
   PERFORM rights_test.throws(format('SELECT public.rights_update_proposal_control(%L,''處理中'',''stale draft'',2)',p),'PT409');
-  j:=public.rights_add_comment(p,'delete synthetic comment',false); c:=(j->>'id')::uuid;
+  j:=public.rights_add_comment(gen_random_uuid(),p,'delete synthetic comment',false); c:=(j->>'id')::uuid;
   PERFORM rights_test.throws(format('SELECT public.rights_delete_comment(%L,''20000000-0000-4000-8000-000000000001'',1)',c),'PT409');
   PERFORM rights_test.assert(public.rights_delete_comment(c,p,1)->>'deleted'='true','delete comment');
-  j:=public.rights_add_comment(p,'cascade synthetic content',true);
+  j:=public.rights_add_comment(gen_random_uuid(),p,'cascade synthetic content',true);
   PERFORM rights_test.throws(format('SELECT public.rights_delete_proposal(%L,2)',p),'PT409');
   PERFORM rights_test.assert(public.rights_delete_proposal(p,3)->>'deleted'='true','delete proposal');
-  j:=public.rights_create_proposal('reject','body','其他'); p:=(j->>'id')::uuid;
+  j:=public.rights_create_proposal(gen_random_uuid(),'reject','body','其他'); p:=(j->>'id')::uuid;
   PERFORM rights_test.assert(public.rights_reject_proposal(p,1)->>'version'='2','reject version');
   PERFORM rights_test.throws(format('SELECT public.rights_approve_proposal(%L,2)',p),'PT409');
-  j:=public.rights_create_home_section('synthetic announcement','synthetic body'); h:=(j->>'id')::uuid;
+  j:=public.rights_create_home_section(gen_random_uuid(),'synthetic announcement','synthetic body'); h:=(j->>'id')::uuid;
   PERFORM rights_test.assert(j->>'version'='1','home version');
   PERFORM rights_test.throws(format('SELECT public.rights_delete_home_section(%L,2)',h),'PT409');
   PERFORM rights_test.assert(public.rights_delete_home_section(h,1)->>'deleted'='true','home delete');
@@ -242,7 +273,7 @@ SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
 SELECT rights_test.assert(public.rights_is_admin(),'admin membership uses lower ECMAScript-trimmed full-domain caller email');
 SELECT rights_test.assert(public.rights_admin_author('feedback',current_setting('rights_test.feedback_id')::uuid)->>'email'='student-1@nehs.hc.edu.tw','later banned target author remains identifiable');
 SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
-SELECT rights_test.throws($q$SELECT public.rights_create_proposal('banned after attribution','body','其他')$q$,'PT403');
+SELECT rights_test.throws($q$SELECT public.rights_create_proposal(gen_random_uuid(),'banned after attribution','body','其他')$q$,'PT403');
 RESET ROLE;
 UPDATE auth.users SET banned_until=NULL,raw_user_meta_data=jsonb_build_object('full_name',repeat('🏫',201),'private_secret','never return metadata') WHERE id='10000000-0000-4000-8000-000000000001';
 UPDATE auth.users SET email='admin-synthetic@nehs.hc.edu.tw' WHERE id='10000000-0000-4000-8000-000000000010';

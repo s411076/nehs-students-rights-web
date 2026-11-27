@@ -129,7 +129,7 @@ labeled synthetic container, never the recovery container or SQL agent DB.
 ```sh
 shasum -a 256 supabase/migrations/*.sql
 # Supply one reviewed hash per manifest entry, in manifest order.
-node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2
+node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2 SHA256_3 SHA256_4
 node tests/real/boundary.http.mjs "$STATE"
 ```
 

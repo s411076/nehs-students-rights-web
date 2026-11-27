@@ -11,10 +11,10 @@ const privileged = [
   { action: 'deleteProposal', payload: { id: 'proposal-1', expectedVersion: 1 } },
   { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '處理中', reply: 'ATTACK', expectedVersion: 1 } },
   { action: 'deleteComment', payload: { id: 'comment-1', proposalId: 'proposal-1', expectedVersion: 1 } },
-  { action: 'createHomeSection', payload: { title: 'ATTACK', content: 'ATTACK' } },
+  { action: 'createHomeSection', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'ATTACK', content: 'ATTACK' } },
   { action: 'deleteHomeSection', payload: { id: 'section-1', expectedVersion: 1 } },
 ] as const;
-const createProposal = { action: 'createProposal', payload: { title: 'Student request', content: 'Student content', category: '其他' } } as const;
+const createProposal = { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'Student request', content: 'Student content', category: '其他' } } as const;
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -120,7 +120,7 @@ test('crafted origin, payload, private target and stale auth requests never muta
   for (const origin of [null, 'null', 'https://foreign.example.test']) expect((await post(context, createProposal, origin)).status()).toBe(403);
   expect((await post(context, { ...createProposal, payload: { ...createProposal.payload, author_name: 'FORGED', status: '處理中' } })).status()).toBe(400);
   for (const proposalId of ['proposal-2', 'proposal-3', 'missing']) {
-    expect((await post(context, { action: 'addComment', payload: { proposalId, content: 'ATTACK', isAnonymous: false } })).status()).toBe(409);
+    expect((await post(context, { action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId, content: 'ATTACK', isAnonymous: false } })).status()).toBe(409);
   }
   await control(request, { revoke: 'student' });
   expect((await post(context, createProposal)).status()).toBe(401);
@@ -282,4 +282,24 @@ test('logout failure hides privileges immediately and reports an explicit failur
   await expect(page.getByRole('button', { name: /登出/ })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /後台管理/ })).toHaveCount(0);
   await capture(page, 'logout-failure');
+});
+
+test('student resends a pending proposal after its receipt is lost', async ({ page, context, request }) => {
+  await login(context, 'student');
+  await page.goto('/proposals');
+  await page.getByLabel('提案標題').fill('Lost receipt');
+  await page.getByLabel('寶貴意見內容').fill('Only one pending proposal');
+  await page.route('**/api/rights/actions', async route => {
+    expect((await route.fetch()).ok()).toBe(true);
+    await route.abort('failed');
+  }, { times: 1 });
+  const send = page.getByRole('button', { name: '送出提案' });
+  await send.click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('可以再次送出未修改的草稿，不會重複新增');
+  await capture(page, 'proposal-before-resend');
+  await send.click();
+  await expect(page.getByLabel('提案標題')).toHaveValue('');
+  const snapshot = await state(request);
+  expect(snapshot.rows('proposals').filter(row => row.content === 'Only one pending proposal')).toHaveLength(1);
+  expect(snapshot.requests.filter(entry => entry.path.endsWith('/rights_create_proposal'))).toHaveLength(2);
 });

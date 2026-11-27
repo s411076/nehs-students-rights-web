@@ -25,11 +25,13 @@ export function createFixtureData() {
   const legacyVotes = new Map<string, number>();
   const votes = new Map<string, Set<string>>();
   const authors = new Map<string, User>();
+  const createReceipts = new Map<string, { args: string; receipt: { inserted: true; id: string; version: number } }>();
   function reset() {
     Object.assign(counters, { insert: 0, update: 0, delete: 0, total: 0 });
     requests.length = 0;
     Object.assign(rpcCounters, { read: 0, mutation: 0 });
     legacyVotes.clear(); votes.clear(); authors.clear();
+    createReceipts.clear();
     for (const key of Object.keys(tables)) delete tables[key];
     Object.assign(tables, {
       admins: [{ email: fixtureUsers.admin.email }],
@@ -46,6 +48,6 @@ export function createFixtureData() {
     for (const row of tables.proposals) legacyVotes.set(String(row.id), Number(row.upvotes_count));
   }
   reset();
-  return { tables, counters, requests, rpcCounters, legacyVotes, votes, authors, reset };
+  return { tables, counters, requests, rpcCounters, legacyVotes, votes, authors, createReceipts, reset };
 }
 export type FixtureData = ReturnType<typeof createFixtureData>;

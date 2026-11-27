@@ -35,7 +35,7 @@ export async function moderation(page: Page, context: BrowserContext, request: A
   await announcement.getByRole('button', { name: /刪除/ }).click();
   await expect(page.getByText('Browser announcement', { exact: true })).toHaveCount(0);
   expect((await state(request)).total).toBe(6);
-  expect((await post(context, { action: 'createProposal', payload: { title: 'Reject in browser', content: 'Moderation test', category: '其他' } })).status()).toBe(200);
+  expect((await post(context, { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'Reject in browser', content: 'Moderation test', category: '其他' } })).status()).toBe(200);
   await page.goto('/proposals');
   await expect(page.getByRole('button', { name: /退回提案/ })).toBeVisible();
   await page.getByRole('button', { name: /退回提案/ }).click();

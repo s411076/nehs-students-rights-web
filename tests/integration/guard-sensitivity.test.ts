@@ -79,7 +79,7 @@ test.each([
   const request = new NextRequest('http://localhost/api/rights/actions', {
     method: 'POST', headers: { cookie: seeded.headers.get('cookie') ?? '', origin: 'https://foreign.test',
       'x-requested-with': REQUESTED_WITH_HEADER, 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'createProposal', payload: { title: 'Origin sensitivity', content: 'control body', category: '其他' } }),
+    body: JSON.stringify({ action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'Origin sensitivity', content: 'control body', category: '其他' } }),
   });
   // When the route-shaped seam (or real route parity control) receives the POST.
   const response = await handler(request);
@@ -98,7 +98,7 @@ test('permits same-origin student creation through the real dispatcher when tran
   const request = new NextRequest('http://localhost/api/rights/actions', {
     method: 'POST', headers: { cookie: seeded.headers.get('cookie') ?? '', origin: 'http://localhost',
       'x-requested-with': REQUESTED_WITH_HEADER, 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'createProposal', payload: { title: 'Origin sensitivity', content: 'control body', category: '其他' } }),
+    body: JSON.stringify({ action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'Origin sensitivity', content: 'control body', category: '其他' } }),
   });
   // When the fully guarded seam receives an authorized student action.
   const response = await guardedTransportSeam(request);

@@ -27,6 +27,7 @@ export function createOperationStore(scope: string, pageFeedback = false) {
   let lifetime = new AbortController();
   return {
     scope, operations, announcements, pageFeedback,
+    createKeys: new Map<string, string>(),
     ballots: createDraftStore<Ballot>(),
     ballotReads: new Map<string, number>(),
     commentRefreshers: createDraftStore<() => Promise<unknown>>(),

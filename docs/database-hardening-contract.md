@@ -102,9 +102,9 @@ All ID mutations except setVote/addComment require expectedVersion.
 
 | Action / RPC suffix (rights_) | RPC parameters |
 | --- | --- |
-| createProposal / create_proposal | p_title,p_content,p_category |
-| createFeedback / create_feedback | p_title,p_content,p_category,p_is_anonymous |
-| addComment / add_comment | p_proposal_id,p_content,p_is_anonymous |
+| createProposal / create_proposal | p_client_key,p_title,p_content,p_category |
+| createFeedback / create_feedback | p_client_key,p_title,p_content,p_category,p_is_anonymous |
+| addComment / add_comment | p_client_key,p_proposal_id,p_content,p_is_anonymous |
 | setVote / set_vote | p_proposal_id,p_voted |
 | updateProposalControl / update_proposal_control | p_id,p_status,p_reply,p_expected_version |
 | approveProposal / approve_proposal | p_id,p_expected_version |
@@ -113,7 +113,7 @@ All ID mutations except setVote/addComment require expectedVersion.
 | deleteComment / delete_comment | p_id,p_proposal_id,p_expected_version |
 | saveFeedbackReply / save_feedback_reply | p_id,p_reply,p_expected_version |
 | deleteFeedback / delete_feedback | p_id,p_expected_version |
-| createHomeSection / create_home_section | p_title,p_content |
+| createHomeSection / create_home_section | p_client_key,p_title,p_content |
 | deleteHomeSection / delete_home_section | p_id,p_expected_version |
 
 Receipts: create {inserted:true,id,version}; edit {id,version}; delete

@@ -37,14 +37,14 @@ export async function sendRightsAction(request: RightsActionRequest, refresh?: (
       body: JSON.stringify(request),
     });
     result = parseResult(await response.json());
-    if (!result || response.ok !== result.ok) return unknownOutcome();
-  } catch { return unknownOutcome(); }
+    if (!result || response.ok !== result.ok) return unknownOutcome(request);
+  } catch { return unknownOutcome(request); }
   // Definitive rejections (400/401/403/409/413/415) pass through with generic
   // messages; only transport/ambiguous outcomes (network/timeout/shape
   // mismatch/503 UNAVAILABLE) collapse to OUTCOME_UNKNOWN. Fail-closed: never retry.
-  if (!result.ok) return result.code === 'UNAVAILABLE' ? unknownOutcome() : result;
+  if (!result.ok) return result.code === 'UNAVAILABLE' ? unknownOutcome(request) : result;
   const receipt = parseMutationReceipt(result.data, request);
-  if (receipt === null) return unknownOutcome();
+  if (receipt === null) return unknownOutcome(request);
   if (refresh) {
     try {
       const refreshed: unknown = await refresh();
@@ -56,8 +56,10 @@ export async function sendRightsAction(request: RightsActionRequest, refresh?: (
   return { ok: true, data: receipt, refresh: 'updated' };
 }
 
-function unknownOutcome(): ClientMutationResult {
-  return { ok: false, code: 'OUTCOME_UNKNOWN', message: '無法確認是否已儲存，請先更新清單確認，勿重複提交。' };
+export function unknownOutcome(request: RightsActionRequest): ClientMutationResult {
+  return { ok: false, code: 'OUTCOME_UNKNOWN', message: 'clientKey' in request.payload
+    ? '無法確認是否已儲存。可以再次送出未修改的草稿，不會重複新增。'
+    : '無法確認是否已儲存，請先更新清單確認，勿重複提交。' };
 }
 
 // Each UI operation owns its flight; independent users/actions never share a mutation cache.

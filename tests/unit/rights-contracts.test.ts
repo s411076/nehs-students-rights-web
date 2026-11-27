@@ -10,9 +10,9 @@ import { toProposalDTO, toFeedbackPublicDTO, toFeedbackAdminDTO, toCommentDTO, t
 import { deriveDisplayName, isEligibleSchoolEmail, isSchoolEmail, normalizeEmail } from '@/lib/auth/types';
 
 const payloads = [
-  { action: 'createProposal', payload: { title: 'title', content: 'body', category: '其他' } },
-  { action: 'createFeedback', payload: { title: '', content: 'body', category: '其他', isAnonymous: true } },
-  { action: 'addComment', payload: { proposalId: 'proposal-1', content: 'body', isAnonymous: false } },
+  { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'title', content: 'body', category: '其他' } },
+  { action: 'createFeedback', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: '', content: 'body', category: '其他', isAnonymous: true } },
+  { action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId: 'proposal-1', content: 'body', isAnonymous: false } },
   { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true } },
   { action: 'updateProposalControl', payload: { id: 'p', expectedVersion: 1, status: '處理中', reply: '' } },
   { action: 'approveProposal', payload: { id: 'p', expectedVersion: 1 } },
@@ -21,7 +21,7 @@ const payloads = [
   { action: 'deleteComment', payload: { id: 'c', proposalId: 'p', expectedVersion: 1 } },
   { action: 'saveFeedbackReply', payload: { id: 'f', expectedVersion: 1, reply: '' } },
   { action: 'deleteFeedback', payload: { id: 'f', expectedVersion: 1 } },
-  { action: 'createHomeSection', payload: { title: 'title', content: 'body' } },
+  { action: 'createHomeSection', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'title', content: 'body' } },
   { action: 'deleteHomeSection', payload: { id: 'h', expectedVersion: 1 } },
 ];
 describe('strict action boundary', () => {
@@ -140,7 +140,7 @@ describe('pagination boundary', () => {
   });
 });
 describe('receipt and client failures', () => {
-  const request = { action: 'createProposal', payload: { title: 't', content: 'c', category: '其他' } } as const;
+  const request = { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 't', content: 'c', category: '其他' } } as const;
   it('rejects success receipts with extra keys or missing versions', () => {
     expect(parseMutationReceipt({ inserted: true }, request)).toBeNull();
     expect(parseMutationReceipt({ id: 'p', inserted: true, version: 1, secret: 'PRIVATE' }, request)).toBeNull();

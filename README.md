@@ -64,8 +64,6 @@ npm run test:e2e
 
 `build` must never run bare: static prerendering of `/auth/callback` triggers the fail-closed browser factory (it throws when public config is missing), so a bare `npm run build` failing there is expected behavior, not a regression. The prefix used by `npm run check` pins config to the useless loopback (port 9) and mocks Google Fonts with `tests/fixtures/google-fonts.cjs`, keeping the whole build offline. All keys are fixture fakes, with no real secrets.
 
-`lint` currently reports 3 errors and 5 warnings (exit 1), all pre-existing (callback `Link`, `AuthProvider` effect, and existing warnings; down from the 12-error, 5-warning historical repair baseline); acknowledge it, do not mislabel it as passing. Security boundaries and residual risks are described in `docs/security-source-remediation.md`.
-
 ## How It Works
 
 **Moderation stays inline, with no separate backend page.** Administrators reply to, delete, and look up feedback authors on `/feedback`; proposal approval/rejection, status/reply editing, comment deletion, and author lookup stay on `/proposals`. Home-section creation/deletion stays on `/`. `/admin` and its feedback-list API have been removed and return 404.
@@ -107,33 +105,19 @@ lib/
   supabase.ts            Browser singleton factory
 proxy.ts                 Refresh forwarding and static exclusions
 tests/
-  unit/                  Contracts, server verification, docs consistency
+  unit/                  Contracts and server verification
   components/            Per-page security behavior
   integration/           Routes, headers, session boundaries
   e2e/                   Real-browser security flows
   fixtures/              Offline fake provider, font mock
 docs/
-  security-source-remediation.md  Security remediation scope and verification docs
   database-hardening.md           Local DB hardening status and release gates (not deployed)
   database-hardening-contract.md  RPC, read, and mutation contract for the hardening work
 ```
 
 ## Documentation
 
-`docs/security-source-remediation.md` records the earlier source-only security remediation. Its historical sections are:
-
-| Section | Contents |
-| --- | --- |
-| §1 Scope | Source changes only, no database or deployment changes |
-| §2 Routes and direct calls | Difference between app routes and direct PostgREST |
-| §3 Mapping | Fixes, mitigations, deferrals, and unverified items across 23 findings |
-| §4 Residual risks | Risk ledger requiring database cooperation |
-| §5 Compatibility risks | Known risks around casing, Origin, vote totals, and more |
-| §6 Offline verification | Executable offline verification methods |
-| §7 Deployment untested | Difference between untested deployment and unprotected source |
-| §8 Completion ledger | Completion record of merged fix packs |
-
-Database hardening runbook: `docs/database-hardening.md` (local-only status plus coordinated release gates; the historical scope in `docs/security-source-remediation.md` is unchanged). Contract: `docs/database-hardening-contract.md`.
+Database hardening runbook: `docs/database-hardening.md` (local-only status plus coordinated release gates). Contract: `docs/database-hardening-contract.md`.
 
 ## Testing and Offline Verification
 

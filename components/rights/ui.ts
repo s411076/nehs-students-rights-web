@@ -8,6 +8,7 @@ export const ui = {
   border,
   card: `${surface} rounded-2xl border ${border} shadow-sm`,
   inset: 'rounded-xl bg-neutral-50 dark:bg-neutral-800/50',
+  guidance: 'rounded-xl bg-neutral-100 dark:bg-neutral-800 p-3 text-sm text-foreground',
   primaryButton: `${button} bg-primary text-primary-foreground hover:bg-blue-800 active:bg-blue-900 dark:hover:bg-blue-300 dark:active:bg-blue-500`,
   secondaryButton: `${button} border ${border} bg-neutral-100 text-neutral-700 hover:bg-neutral-200 active:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700 dark:active:bg-neutral-600`,
   dangerButton: `${button} border border-danger/50 bg-transparent text-danger hover:bg-danger hover:text-danger-foreground active:bg-danger active:text-danger-foreground`,

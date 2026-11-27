@@ -44,7 +44,7 @@ export function HomeSections() {
             className={ui.secondaryButton}>重新載入公告</button>
         </div>
       </form>
-      <ActionFeedback error={mutation.error} notice={mutation.notice} />
+      <ActionFeedback {...mutation.feedback} />
     </div>}
     <div className="space-y-6">
       {sections.status === 'loading' && sections.items.length === 0 && <p className="text-sm text-gray-400 py-2">公告載入中…</p>}

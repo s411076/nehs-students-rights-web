@@ -8,6 +8,7 @@ export type OperationTarget = {
 export type OperationState = {
   readonly busy: boolean;
   readonly error: string;
+  readonly guidance: string;
   readonly notice: string;
   readonly result: ClientMutationResult | null;
   readonly flight: ReturnType<typeof createRightsActionFlight> | null;
@@ -19,7 +20,7 @@ type Announcement = {
   readonly state: OperationState;
   readonly recoverFocus: FocusRecovery | null;
 };
-export const EMPTY_OPERATION: OperationState = { busy: false, error: '', notice: '', result: null, flight: null };
+export const EMPTY_OPERATION: OperationState = { busy: false, error: '', guidance: '', notice: '', result: null, flight: null };
 
 export function createOperationStore(scope: string, pageFeedback = false) {
   const operations = createDraftStore<OperationState>();

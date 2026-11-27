@@ -33,9 +33,9 @@ export function rightsDatabaseFailure(error: { readonly code?: string }) {
 
 export function actionRpc(request: RightsActionRequest) {
   switch (request.action) {
-    case 'createProposal': return { name: 'rights_create_proposal', args: { p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category } };
-    case 'createFeedback': return { name: 'rights_create_feedback', args: { p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category, p_is_anonymous: request.payload.isAnonymous } };
-    case 'addComment': return { name: 'rights_add_comment', args: { p_proposal_id: request.payload.proposalId, p_content: request.payload.content, p_is_anonymous: request.payload.isAnonymous } };
+    case 'createProposal': return { name: 'rights_create_proposal', args: { p_client_key: request.payload.clientKey, p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category } };
+    case 'createFeedback': return { name: 'rights_create_feedback', args: { p_client_key: request.payload.clientKey, p_title: request.payload.title, p_content: request.payload.content, p_category: request.payload.category, p_is_anonymous: request.payload.isAnonymous } };
+    case 'addComment': return { name: 'rights_add_comment', args: { p_client_key: request.payload.clientKey, p_proposal_id: request.payload.proposalId, p_content: request.payload.content, p_is_anonymous: request.payload.isAnonymous } };
     case 'setVote': return { name: 'rights_set_vote', args: { p_proposal_id: request.payload.proposalId, p_voted: request.payload.voted } };
     case 'updateProposalControl': return { name: 'rights_update_proposal_control', args: { p_id: request.payload.id, p_status: request.payload.status, p_reply: request.payload.reply, p_expected_version: request.payload.expectedVersion } };
     case 'approveProposal': return { name: 'rights_approve_proposal', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
@@ -44,7 +44,7 @@ export function actionRpc(request: RightsActionRequest) {
     case 'deleteComment': return { name: 'rights_delete_comment', args: { p_id: request.payload.id, p_proposal_id: request.payload.proposalId, p_expected_version: request.payload.expectedVersion } };
     case 'saveFeedbackReply': return { name: 'rights_save_feedback_reply', args: { p_id: request.payload.id, p_reply: request.payload.reply, p_expected_version: request.payload.expectedVersion } };
     case 'deleteFeedback': return { name: 'rights_delete_feedback', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
-    case 'createHomeSection': return { name: 'rights_create_home_section', args: { p_title: request.payload.title, p_content: request.payload.content } };
+    case 'createHomeSection': return { name: 'rights_create_home_section', args: { p_client_key: request.payload.clientKey, p_title: request.payload.title, p_content: request.payload.content } };
     case 'deleteHomeSection': return { name: 'rights_delete_home_section', args: { p_id: request.payload.id, p_expected_version: request.payload.expectedVersion } };
     default: return assertNever(request);
   }

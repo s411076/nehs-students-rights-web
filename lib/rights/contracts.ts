@@ -78,17 +78,20 @@ export const ADMIN_ACTIONS: readonly AdminActionName[] = [
 export const RIGHTS_ACTIONS: readonly RightsActionName[] = [...STUDENT_ACTIONS, ...ADMIN_ACTIONS];
 
 export interface CreateProposalPayload {
+  clientKey: string;
   title: string;
   content: string;
   category: ProposalCategory;
 }
 export interface CreateFeedbackPayload {
+  clientKey: string;
   title: string;
   content: string;
   category: ProposalCategory;
   isAnonymous: boolean;
 }
 export interface AddCommentPayload {
+  clientKey: string;
   proposalId: string;
   content: string;
   isAnonymous: boolean;
@@ -118,6 +121,7 @@ export interface SaveFeedbackReplyPayload {
   reply: string;
 }
 export interface CreateHomeSectionPayload {
+  clientKey: string;
   title: string;
   content: string;
 }

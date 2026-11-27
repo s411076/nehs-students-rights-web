@@ -155,7 +155,7 @@ test('verified student posts named feedback; payload carries boolean flag, autho
   const body = JSON.parse(String(posted[0]?.init?.body));
   expect(body).toEqual({
     action: 'createFeedback',
-    payload: { title: expect.any(String), content: 'Named student body text', category: expect.any(String), isAnonymous: false },
+    payload: { clientKey: expect.any(String), title: expect.any(String), content: 'Named student body text', category: expect.any(String), isAnonymous: false },
   });
   expect(typeof body.payload.isAnonymous).toBe('boolean');
   expect(body.payload).not.toHaveProperty('author_name');

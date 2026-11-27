@@ -76,7 +76,7 @@ describe('pagination boundary', () => {
     expect(parsePage({ items: [proposal], nextCursor: cursor }, toProposalDTO)).toEqual({ items: [proposal], nextCursor: cursor });
   });
   it('defaults to twenty rows without cursor or query', () => {
-    expect(parsePageParameters(new URLSearchParams())).toEqual({ ok: true, data: { p_limit: 21, p_cursor: null, p_query: '' } });
+    expect(parsePageParameters(new URLSearchParams())).toEqual({ ok: true, data: { p_limit: 20, p_cursor: null, p_query: '' } });
   });
   it.each(['limit=0', 'limit=51', 'limit=1.5', 'limit=1&limit=2', 'cursor=null', 'cursor={', 'cursor={"id":"p"}', `query=${'🏫'.repeat(101)}`])('rejects malformed page parameters %s', query => {
     expect(parsePageParameters(new URLSearchParams(query)).ok).toBe(false);

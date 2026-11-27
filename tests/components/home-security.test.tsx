@@ -268,7 +268,7 @@ test('publishes an announcement once as admin and refreshes the list after confi
   await waitFor(() => expect(posted).toHaveLength(1));
   expect(posted[0]).toEqual({
     action: 'createHomeSection',
-    payload: { title: '新公告', content: '這是新公告內容' },
+    payload: { clientKey: expect.any(String), title: '新公告', content: '這是新公告內容' },
   });
   expect(await screen.findByText('首頁欄位發布成功！')).toBeInTheDocument();
   expect((screen.getByPlaceholderText('欄位標題...') as HTMLInputElement).value).toBe('');

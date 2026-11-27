@@ -20,13 +20,13 @@ export function HomeSections() {
   return <>
     {isAdmin && <div className={`${ui.card} p-6 mb-8`}>
       <h2 className="text-lg font-bold text-gray-800 dark:text-neutral-200 mb-3 flex items-center gap-2"><ShieldCheck aria-hidden="true" className="size-5 shrink-0" /> 管理員控制台：新增首頁動態欄位</h2>
-      <form onSubmit={event => {
+      <form onChange={mutation.resetCreateKey} onSubmit={event => {
         event.preventDefault();
         const checkedTitle = validateRawTitle(title);
         const checkedBody = validateBody(content);
         if (!checkedTitle.ok) { mutation.setError('請輸入有效的標題（1–100 字）。'); return; }
         if (!checkedBody.ok) { mutation.setError('請輸入有效的內容（1–5000 字）。'); return; }
-        void mutation.run({ action: 'createHomeSection', payload: { title: checkedTitle.data, content: checkedBody.data } }, sections.refresh).then(result => {
+        void mutation.run({ action: 'createHomeSection', payload: { clientKey: mutation.createKey(), title: checkedTitle.data, content: checkedBody.data } }, sections.refresh).then(result => {
           if (!result?.ok) return;
           setTitle(''); setContent('');
           if (result.refresh === 'updated') mutation.setNotice('首頁欄位發布成功！');

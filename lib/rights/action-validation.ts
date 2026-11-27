@@ -4,14 +4,18 @@ import { validateBody, validateCategory, validateCommentContent, validateControl
 import { isRecord } from './queries';
 
 const PAYLOAD_KEYS: Record<RightsActionName, readonly string[]> = {
-  createProposal: ['title', 'content', 'category'], createFeedback: ['title', 'content', 'category', 'isAnonymous'],
-  addComment: ['proposalId', 'content', 'isAnonymous'], setVote: ['proposalId', 'voted'],
+  createProposal: ['clientKey', 'title', 'content', 'category'], createFeedback: ['clientKey', 'title', 'content', 'category', 'isAnonymous'],
+  addComment: ['clientKey', 'proposalId', 'content', 'isAnonymous'], setVote: ['proposalId', 'voted'],
   updateProposalControl: ['id', 'status', 'reply', 'expectedVersion'],
   approveProposal: ['id', 'expectedVersion'], rejectProposal: ['id', 'expectedVersion'],
   deleteProposal: ['id', 'expectedVersion'], deleteComment: ['id', 'proposalId', 'expectedVersion'],
   saveFeedbackReply: ['id', 'reply', 'expectedVersion'], deleteFeedback: ['id', 'expectedVersion'],
-  createHomeSection: ['title', 'content'], deleteHomeSection: ['id', 'expectedVersion'],
+  createHomeSection: ['clientKey', 'title', 'content'], deleteHomeSection: ['id', 'expectedVersion'],
 };
+function validateClientKey(value: unknown): RightsResult<string> {
+  return typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+    ? makeSuccess(value.toLowerCase()) : makeFailure('INVALID_PAYLOAD');
+}
 function exactKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(record).length === keys.length && keys.every(key => Object.hasOwn(record, key));
 }
@@ -22,20 +26,26 @@ export function parseActionRequest(input: unknown): RightsResult<RightsActionReq
   if (action === undefined || !isRecord(payload) || !exactKeys(payload, PAYLOAD_KEYS[action])) return makeFailure('INVALID_PAYLOAD');
   switch (action) {
     case 'createProposal': {
+      const key = validateClientKey(payload.clientKey);
+      if (!key.ok) return key;
       const title = validateRawTitle(payload.title), content = validateBody(payload.content), category = validateCategory(payload.category);
       if (!title.ok) return title; if (!content.ok) return content; if (!category.ok) return category;
-      return makeSuccess({ action, payload: { title: title.data, content: content.data, category: category.data } });
+      return makeSuccess({ action, payload: { clientKey: key.data, title: title.data, content: content.data, category: category.data } });
     }
     case 'createFeedback': {
+      const key = validateClientKey(payload.clientKey);
+      if (!key.ok) return key;
       const title = validateFeedbackTitle(payload.title), content = validateBody(payload.content), category = validateCategory(payload.category);
       const isAnonymous = validateIsAnonymous(payload.isAnonymous);
       if (!title.ok) return title; if (!content.ok) return content; if (!category.ok) return category; if (!isAnonymous.ok) return isAnonymous;
-      return makeSuccess({ action, payload: { title: title.data, content: content.data, category: category.data, isAnonymous: isAnonymous.data } });
+      return makeSuccess({ action, payload: { clientKey: key.data, title: title.data, content: content.data, category: category.data, isAnonymous: isAnonymous.data } });
     }
     case 'addComment': {
+      const key = validateClientKey(payload.clientKey);
+      if (!key.ok) return key;
       const proposalId = validateId(payload.proposalId), content = validateCommentContent(payload.content), isAnonymous = validateIsAnonymous(payload.isAnonymous);
       if (!proposalId.ok) return proposalId; if (!content.ok) return content; if (!isAnonymous.ok) return isAnonymous;
-      return makeSuccess({ action, payload: { proposalId: proposalId.data, content: content.data, isAnonymous: isAnonymous.data } });
+      return makeSuccess({ action, payload: { clientKey: key.data, proposalId: proposalId.data, content: content.data, isAnonymous: isAnonymous.data } });
     }
     case 'setVote': {
       const proposalId = validateId(payload.proposalId), voted = validateIsAnonymous(payload.voted);
@@ -43,9 +53,11 @@ export function parseActionRequest(input: unknown): RightsResult<RightsActionReq
       return makeSuccess({ action, payload: { proposalId: proposalId.data, voted: voted.data } });
     }
     case 'createHomeSection': {
+      const key = validateClientKey(payload.clientKey);
+      if (!key.ok) return key;
       const title = validateRawTitle(payload.title), content = validateBody(payload.content);
       if (!title.ok) return title; if (!content.ok) return content;
-      return makeSuccess({ action, payload: { title: title.data, content: content.data } });
+      return makeSuccess({ action, payload: { clientKey: key.data, title: title.data, content: content.data } });
     }
     case 'updateProposalControl': {
       const id = validateId(payload.id), version = validateCount(payload.expectedVersion), status = validateControlStatus(payload.status), reply = validateReply(payload.reply);

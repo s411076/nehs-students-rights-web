@@ -50,7 +50,7 @@ export function ProposalComments({ item }: { readonly item: ProposalDTO }) {
       {auth.isAdmin && <AuthorReveal kind="comment" id={comment.id} />}
     </div>)}
     <PageContinuation hasMore={comments.nextCursor !== null} loading={comments.status === 'loading'} onLoadMore={comments.loadMore} label={`載入更多留言：${item.title}`} />
-    {auth.isLoggedIn && <div className="space-y-2 pt-2">
+    {auth.isLoggedIn && <div onChange={mutation.resetCreateKey} className="space-y-2 pt-2">
       <label htmlFor={`proposal-comment-${item.id}`} className="block text-xs font-semibold text-gray-700 dark:text-neutral-300">新增留言<span className="sr-only">：{item.title}</span></label>
       <textarea id={`proposal-comment-${item.id}`} value={content} onChange={event => draft.edit({ ...draft.value, content: event.target.value })} rows={2} disabled={mutation.busy}
         placeholder="寫下您的看法與建議..."
@@ -61,7 +61,7 @@ export function ProposalComments({ item }: { readonly item: ProposalDTO }) {
           <span className="inline-flex items-center gap-1.5"><UserRoundMinus aria-hidden="true" className="size-4 shrink-0" /> 匿名留言 (隱藏姓名)</span>
         </label>
         <button type="button" disabled={mutation.busy || !mutation.canWrite} onClick={() => {
-          void mutation.run({ action: 'addComment', payload: { proposalId: item.id, content, isAnonymous: anonymous } }, refresh, draft.acknowledge);
+          void mutation.run({ action: 'addComment', payload: { clientKey: mutation.createKey(), proposalId: item.id, content, isAnonymous: anonymous } }, refresh, draft.acknowledge);
         }} className={ui.primaryButton}>送出留言</button>
       </div>
     </div>}

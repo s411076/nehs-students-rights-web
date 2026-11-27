@@ -173,7 +173,7 @@ test('increments versions and rejects stale or already reviewed targets without 
 
 test('derives attribution and reply defaults while public anonymous reads stay redacted even for admins', async () => {
   // Given a verified school identity; when anonymous feedback is created.
-  const receipt = await (await rpc('create_feedback', { p_title: 'New feedback', p_content: 'Body', p_category: '其他', p_is_anonymous: true }, 'student')).json();
+  const receipt = await (await rpc('create_feedback', { p_client_key: crypto.randomUUID(), p_title: 'New feedback', p_content: 'Body', p_category: '其他', p_is_anonymous: true }, 'student')).json();
   // Then new attribution is known only through the admin lookup, with explicit reply defaults.
   expect(receipt).toEqual({ inserted: true, id: 'insert-1', version: 1 });
   const publicItem = await (await rpc('get_public_item', { p_kind: 'feedback', p_id: receipt.id }, 'admin')).json();
@@ -205,7 +205,7 @@ test.each([
   { title: ' Explicit title ', content: 'Body', expected: 'Explicit title' },
 ])('derives the SQL feedback title when receiving $title and $content', async ({ title, content, expected }) => {
   // Given valid anonymous feedback with an optional title; when the create RPC runs.
-  const response = await rpc('create_feedback', { p_title: title, p_content: content, p_category: '其他', p_is_anonymous: true }, 'student');
+  const response = await rpc('create_feedback', { p_client_key: crypto.randomUUID(), p_title: title, p_content: content, p_category: '其他', p_is_anonymous: true }, 'student');
   // Then persisted title, identity and defaults follow the SQL create function.
   expect(response.status).toBe(200);
   expect(fixture.data.tables.feedback.at(-1)).toMatchObject({ title: expected, author_name: 'Fixture student', user_id: 'student',
@@ -217,7 +217,7 @@ test.each([
   { title: ' [課程與教學] Existing prefix ', expected: '[課程與教學] Existing prefix' },
 ])('preserves SQL proposal prefix semantics when receiving $title', async ({ title, expected }) => {
   // Given a school identity and a title; when the proposal is created.
-  const response = await rpc('create_proposal', { p_title: title, p_content: 'Body', p_category: '其他' }, 'student');
+  const response = await rpc('create_proposal', { p_client_key: crypto.randomUUID(), p_title: title, p_content: 'Body', p_category: '其他' }, 'student');
   // Then a preexisting bracket prefix is preserved rather than duplicated.
   expect(response.status).toBe(200);
   expect(fixture.data.tables.proposals.at(-1)).toMatchObject({ title: expected, status: '待審核', version: 1 });

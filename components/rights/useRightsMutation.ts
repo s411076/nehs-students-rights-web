@@ -3,7 +3,7 @@
 import { useLayoutEffect, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { useVerification, VERIFICATION_PAUSED_MESSAGE } from '@/components/VerificationContext';
-import { createRightsActionFlight } from '@/lib/rights/client';
+import { createRightsActionFlight, unknownOutcome } from '@/lib/rights/client';
 import { ADMIN_ACTIONS, makeFailure } from '@/lib/rights/contracts';
 import { parseActionRequest } from '@/lib/rights/validation';
 import type { MutationReceipt } from '@/lib/rights/receipts';
@@ -44,6 +44,14 @@ export function useRightsMutation(target?: OperationTarget) {
     return false;
   };
 
+  const resetCreateKey = () => { owner.createKeys.delete(key); };
+  const createKey = () => {
+    const existing = owner.createKeys.get(key);
+    if (existing) return existing;
+    const fresh = crypto.randomUUID();
+    owner.createKeys.set(key, fresh);
+    return fresh;
+  };
   const run = async (request: unknown, refresh?: () => Promise<unknown>, acknowledge?: (receipt: MutationReceipt) => void) => {
     const signal = owner.signal;
     if (signal.aborted || slot.read()?.busy) return null;
@@ -63,16 +71,19 @@ export function useRightsMutation(target?: OperationTarget) {
       result = await flight(parsed.data, refresh ? async () => signal.aborted ? makeFailure('UNAVAILABLE') : refresh() : undefined);
     } catch (caught) {
       if (!(caught instanceof Error)) throw caught;
-      result = { ok: false, code: 'OUTCOME_UNKNOWN', message: '無法確認是否已儲存，請先更新清單確認，勿重複提交。' };
+      result = unknownOutcome(parsed.data);
     }
     if (signal.aborted) return null;
-    if (result.ok) acknowledge?.(result.data);
+    if (result.ok) {
+      if ('clientKey' in parsed.data.payload) resetCreateKey();
+      acknowledge?.(result.data);
+    }
     const error = result.ok ? '' : result.code === 'CONFLICT' ? CONFLICT_DRAFT_MESSAGE : result.message;
     const notice = result.ok ? result.refresh === 'failed' ? result.message ?? '已儲存，但清單更新失敗' : '操作已成功完成。' : '';
     publish({ busy: false, error, notice, result, flight }, recoverFocus);
     return result;
   };
-  return { run, ...state, setError, setNotice, owner, canWrite: verification.canWrite, checkReady,
+  return { run, createKey, resetCreateKey, ...state, setError, setNotice, owner, canWrite: verification.canWrite, checkReady,
     feedback: { error: state.error, notice: owner.pageFeedback ? '' : state.notice, announce: !owner.pageFeedback },
   };
 }

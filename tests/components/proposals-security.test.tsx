@@ -34,7 +34,8 @@ function client() {
 }
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => client() }));
 vi.mock('../../lib/supabase', () => ({ createClient: () => client() }));
-vi.mock('../../lib/rights/client', () => ({
+vi.mock('../../lib/rights/client', async importOriginal => ({
+  ...await importOriginal<typeof import('../../lib/rights/client')>(),
   readRights: async (path: string, parse: (value: unknown) => unknown) => {
     try {
       let data: unknown;
@@ -102,7 +103,7 @@ test('creates a student proposal using only raw input, leaving identity/status/c
   fireEvent.change(screen.getByPlaceholderText('請詳細說明您的想法或建議...'), { target: { value: '  New body  ' } });
   fireEvent.click(screen.getByRole('button', { name: '送出提案' }));
   // Then
-  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'createProposal', payload: { title: 'Draft', content: 'New body', category: '環境與設備' } }, expect.any(Function)));
+  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'createProposal', payload: { clientKey: expect.any(String), title: 'Draft', content: 'New body', category: '環境與設備' } }, expect.any(Function)));
   await waitFor(() => expect(screen.getByPlaceholderText('例如：關於圖書館開館時間建議...')).toHaveValue(''));
   expect(state.reads).not.toHaveBeenCalled();
 });
@@ -137,7 +138,7 @@ test.each([true, false])('preserves the anonymous comment option (%s) through th
   if (anonymous) fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
   // Then
-  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'addComment', payload: { proposalId: 'p1', content: 'Comment draft', isAnonymous: anonymous } }, expect.any(Function)));
+  await waitFor(() => expect(state.requests).toHaveBeenCalledWith({ action: 'addComment', payload: { clientKey: expect.any(String), proposalId: 'p1', content: 'Comment draft', isAnonymous: anonymous } }, expect.any(Function)));
   await waitFor(() => expect(input).toHaveValue(''));
 });
 

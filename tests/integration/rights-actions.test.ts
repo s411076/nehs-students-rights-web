@@ -24,13 +24,13 @@ const adminCases = [
   { action: 'deleteComment', payload: { id: 'comment-1', proposalId: 'proposal-1', expectedVersion: 1 } },
   { action: 'saveFeedbackReply', payload: { id: 'feedback-1', reply: 'reply', expectedVersion: 1 } },
   { action: 'deleteFeedback', payload: { id: 'feedback-1', expectedVersion: 1 } },
-  { action: 'createHomeSection', payload: { title: 'home', content: 'body' } },
+  { action: 'createHomeSection', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'home', content: 'body' } },
   { action: 'deleteHomeSection', payload: { id: 'section-1', expectedVersion: 1 } },
 ] satisfies RightsActionRequest[];
 const studentCases = [
-  { action: 'createProposal', payload: { title: 'title', content: 'body', category: '其他' } },
-  { action: 'createFeedback', payload: { title: '', content: '1234567890123456789', category: '其他', isAnonymous: true } },
-  { action: 'addComment', payload: { proposalId: 'proposal-1', content: 'comment', isAnonymous: false } },
+  { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'title', content: 'body', category: '其他' } },
+  { action: 'createFeedback', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: '', content: '1234567890123456789', category: '其他', isAnonymous: true } },
+  { action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId: 'proposal-1', content: 'comment', isAnonymous: false } },
   { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true } },
 ] satisfies RightsActionRequest[];
 async function actionRequest(body: unknown, identity: 'student' | 'admin' = 'student', headers: Readonly<Record<string, string | undefined>> = {}) {
@@ -49,11 +49,11 @@ const rpcCases = [
   ['delete_comment', { p_id: 'comment-1', p_proposal_id: 'proposal-1', p_expected_version: 1 }],
   ['save_feedback_reply', { p_id: 'feedback-1', p_reply: 'reply', p_expected_version: 1 }],
   ['delete_feedback', { p_id: 'feedback-1', p_expected_version: 1 }],
-  ['create_home_section', { p_title: 'home', p_content: 'body' }],
+  ['create_home_section', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: 'home', p_content: 'body' }],
   ['delete_home_section', { p_id: 'section-1', p_expected_version: 1 }],
-  ['create_proposal', { p_title: 'title', p_content: 'body', p_category: '其他' }],
-  ['create_feedback', { p_title: '', p_content: '1234567890123456789', p_category: '其他', p_is_anonymous: true }],
-  ['add_comment', { p_proposal_id: 'proposal-1', p_content: 'comment', p_is_anonymous: false }],
+  ['create_proposal', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: 'title', p_content: 'body', p_category: '其他' }],
+  ['create_feedback', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: '', p_content: '1234567890123456789', p_category: '其他', p_is_anonymous: true }],
+  ['add_comment', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_proposal_id: 'proposal-1', p_content: 'comment', p_is_anonymous: false }],
   ['set_vote', { p_proposal_id: 'proposal-1', p_voted: true }],
 ] as const;
 test.each(adminCases)('denies student $action before mutation RPC', async body => {
@@ -102,7 +102,7 @@ test('preserves historical vote baseline and desired-state idempotence', async (
   expect(fixture.data.tables.proposals[0].upvotes_count).toBe(before);
 });
 test.each(['proposal-2', 'proposal-3', 'proposal-4', 'missing'])('rejects comments on invisible %s', async proposalId => {
-  const response = await POST(await actionRequest({ action: 'addComment', payload: { proposalId, content: 'text', isAnonymous: true } }));
+  const response = await POST(await actionRequest({ action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId, content: 'text', isAnonymous: true } }));
   expect(response.status).toBe(409);
   expect(fixture.data.counters.total).toBe(0);
 });

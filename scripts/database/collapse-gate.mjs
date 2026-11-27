@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadMigrationChain } from './migrations.mjs';
+import { checkConcurrency } from './concurrency.mjs';
 
 // Portable synthetic gate: task-owned supabase/postgres container, no recovery
 // container, no backups, no production. The stock postgres:17 image cannot
@@ -125,11 +126,12 @@ try {
   sql(database, file('tests/database/managed-principal.sql'), 'supabase_admin', 'post-migration effective privileges');
   sql(database, `BEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`, 'supabase_admin', 'full SQL regression');
   sql(database, file('tests/database/queues.sql'), 'supabase_admin', 'filtered queue totals and gating');
+  await checkConcurrency(container, database, sql);
   writeFileSync(resolve(root, 'tests/database/verification-collapse.json'), `${JSON.stringify({
     command: 'node scripts/database/collapse-gate.mjs', container, database, image,
     migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
     prerequisites: baseline, mappingCounts: counts,
-    passed: ['managed-principal', 'whole-chain', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression'],
+    passed: ['managed-principal', 'whole-chain', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],
     completedAt: new Date().toISOString(), productionConnection: false, recoveredRowsOutput: false,
   }, null, 2)}\n`);
   console.log('PASS: portable NOSUPERUSER postgres whole-chain collapse gate with cleanup and full SQL regression');

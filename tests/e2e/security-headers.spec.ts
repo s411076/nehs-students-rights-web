@@ -12,7 +12,7 @@ test('security headers present on live responses while hydration and auth still 
   for (const path of ['/', '/proposals', '/feedback', '/api/rights/session', '/api/rights/feedback']) {
     const response = await request.get(`${baseURL}${path}`);
     const headers = response.headers();
-    expect(headers['x-frame-options'], path).toBe('SAMEORIGIN');
+    expect(headers['x-frame-options'], path).toBe('DENY');
     expect(headers['x-content-type-options'], path).toBe('nosniff');
     expect(headers['referrer-policy'], path).toBe('strict-origin-when-cross-origin');
     // frame-ancestors 'none' is the enforcement that stops an external iframe

@@ -5,9 +5,9 @@ export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('.', import.meta.url)) } },
   oxc: { jsx: { runtime: 'automatic' } },
   test: {
-    environment: 'jsdom',
-    include: ['tests/{unit,components,integration}/**/*.test.{ts,tsx}'],
-    setupFiles: ['tests/setup.ts'],
+    environment: 'node',
+    include: ['tests/{unit,integration}/**/*.test.ts', 'tests/components/**/*.test.tsx'],
+    unstubGlobals: true,
     restoreMocks: true,
   },
 });

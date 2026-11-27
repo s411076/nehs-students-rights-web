@@ -1,6 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import type { FixtureData, Row } from './supabase-data.ts';
-import { admin, FixtureRpcError, isAdmin, publicProposal, requiredText, text } from './supabase-rpc-common.ts';
+import { admin, FixtureRpcError, isAdmin, publicProposal, requiredText, text, uuid } from './supabase-rpc-common.ts';
 
 const fields = {
   proposals: ['id', 'title', 'content', 'author_name', 'status', 'upvotes_count', 'reply', 'created_at', 'version'],
@@ -33,7 +33,11 @@ function cursor(value: unknown): { readonly created_at: string; readonly id: str
   const created_at = requiredText(row.created_at, 64);
   if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)$/.test(created_at) || !Number.isFinite(Date.parse(created_at))) throw new FixtureRpcError(400, 'Invalid timestamp');
   if (Object.keys(row).some(key => !['id', 'created_at'].includes(key))) throw new FixtureRpcError(400, 'Invalid cursor fields');
-  return { created_at, id: requiredText(row.id, 128) };
+  const day = created_at.slice(0, 10);
+  if (new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day) {
+    throw new FixtureRpcError(400, 'Invalid calendar date');
+  }
+  return { created_at, id: uuid(row.id) };
 }
 // Numeric epoch microseconds retain database precision; output keeps original strings.
 function micros(value: unknown) {

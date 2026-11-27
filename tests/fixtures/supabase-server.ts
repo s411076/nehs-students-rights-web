@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { createFixtureData, fixtureUsers, fakePublishableKey } from './supabase-data.ts';
 import type { FixtureIdentity, Row } from './supabase-data.ts';
 import type { User } from '@supabase/supabase-js';
-import { FixtureRpcError } from './supabase-rpc-common.ts';
+import { FixtureRpcError, uuid } from './supabase-rpc-common.ts';
 import { readRpc } from './supabase-rpc-reads.ts';
 import { mutateRpc, mutationRpcs } from './supabase-rpc-mutations.ts';
 
@@ -26,7 +26,6 @@ export async function startSupabaseFixture(port = 0) {
   const data = createFixtureData();
   const tokens = new Map<string, User>(Object.entries(fixtureUsers).map(([identity, user]) => [fixtureToken(identity), user]));
   let failure: { path: string; method: string } | null = null;
-  let defaults = false;
   const server = createServer((request, response) => {
     void handle(request, response).catch(error => {
       response.statusCode = 500;
@@ -45,7 +44,7 @@ export async function startSupabaseFixture(port = 0) {
     if (method === 'OPTIONS') return send(200, {});
     if (url.pathname === '/__fixture/health') return send(200, { ready: true });
     if (url.pathname === '/__fixture/reset') {
-      data.reset(); failure = null; defaults = false;
+      data.reset(); failure = null;
       tokens.clear();
       Object.entries(fixtureUsers).forEach(([identity, user]) => { tokens.set(fixtureToken(identity), user); });
       return send(200, {});
@@ -57,19 +56,10 @@ export async function startSupabaseFixture(port = 0) {
       if (typeof body.revoke === 'string') tokens.delete(fixtureToken(body.revoke));
       if (typeof body.path === 'string' && typeof body.method === 'string') failure = { path: body.path, method: body.method };
       if (body.clear === true) failure = null;
-      if (body.defaults === true) defaults = true;
-      if (typeof body.table === 'string' && Array.isArray(body.rows) && data.tables[body.table]) {
-        const rows: Row[] = body.rows.map(parseRow).map(row => ({ version: 1, ...row }));
-        data.tables[body.table].push(...rows);
-        if (body.table === 'proposals') for (const row of rows) data.legacyVotes.set(String(row.id), Number(row.upvotes_count ?? 0));
-      }
       return send(200, {});
     }
-    data.requests.push({ method, path: url.pathname + url.search, token });
+    data.requests.push({ method, path: url.pathname + url.search });
     if (request.headers.apikey !== fakePublishableKey) return send(401, { message: 'Invalid fixture key' });
-    if (url.pathname.startsWith('/rest/v1/rpc/rights_') && method === 'POST') {
-      data.rpcCounters[mutationRpcs.has(url.pathname.slice('/rest/v1/rpc/'.length)) ? 'mutation' : 'read']++;
-    }
     if (failure?.path === url.pathname && failure.method === method) return send(400, { message: 'Injected provider failure' });
     const verified = tokens.get(token);
     if (url.pathname === '/auth/v1/logout') return send(200, {});
@@ -89,6 +79,7 @@ export async function startSupabaseFixture(port = 0) {
       const mutation = mutationRpcs.has(name);
       try {
         const body = await readBody(request);
+        validateArguments(name, body);
         return send(200, mutation ? mutateRpc(data, name, { body, user: verified }) : readRpc(data, name, { body, user: verified }));
       } catch (error) {
         if (error instanceof FixtureRpcError) return send(error.status, { code: error.code, message: error.message, details: null, hint: null });
@@ -96,45 +87,7 @@ export async function startSupabaseFixture(port = 0) {
         throw error;
       }
     }
-    const table = url.pathname.replace('/rest/v1/', '');
-    const rows = data.tables[table];
-    if (!url.pathname.startsWith('/rest/v1/') || !rows) return send(404, { message: 'Unknown fixture endpoint' });
-    const selected = rows.filter(row => matches(row, url.searchParams));
-    let result = selected;
-    if (method !== 'GET' && method !== 'HEAD') {
-      if (!verified) return send(401, { message: 'Authenticated token required' });
-      // Deliberately NO role/ownership/RLS checks. Application guards must stop students.
-      switch (method) {
-        case 'PATCH': { const body = await readBody(request); selected.forEach(row => { Object.assign(row, body); }); if (selected.length) data.counters.update++; break; }
-        case 'DELETE': data.tables[table] = rows.filter(row => !selected.includes(row)); if (selected.length) data.counters.delete++; break;
-        case 'POST': {
-          const body = await readJson(request);
-          const inserted = (Array.isArray(body) ? body : [body]).map(parseRow).map(row => ({
-            id: `insert-${data.counters.total + 1}`,
-            ...(defaults ? { created_at: '2026-01-01T00:00:00Z',
-              ...(table === 'feedback' ? { reply: '', replied_at: null } : table === 'proposals' ? { reply: '' } : {}) } : {}), ...row,
-          }));
-          rows.push(...inserted); result = inserted; data.counters.insert++; break;
-        }
-        default: return send(405, { message: 'Unsupported fixture method' });
-      }
-      if (method === 'POST' || selected.length) data.counters.total++;
-      if (!request.headers.prefer?.includes('return=representation')) return send(200, null);
-    }
-    const order = url.searchParams.get('order');
-    if (order) {
-      const [field, direction] = order.split('.');
-      result = [...result].sort((a, b) => String(a[field]).localeCompare(String(b[field])) * (direction === 'desc' ? -1 : 1));
-    }
-    const limit = url.searchParams.get('limit');
-    if (limit) result = result.slice(0, Number(limit));
-    const fields = url.searchParams.get('select');
-    const projected = result.map(row => fields && fields !== '*' ? Object.fromEntries(fields.split(',').map(field => [field, row[field]])) : row);
-    response.setHeader('Content-Range', `0-${Math.max(0, projected.length - 1)}/${projected.length}`);
-    if (request.headers.accept?.includes('application/vnd.pgrst.object+json')) {
-      return projected.length === 1 ? send(200, projected[0]) : send(406, { code: 'PGRST116', message: 'Expected single row' });
-    }
-    return send(200, projected);
+    return send(403, { code: '42501', message: 'No table privileges' });
   }
   server.listen(port, '127.0.0.1');
   await once(server, 'listening');
@@ -144,15 +97,6 @@ export async function startSupabaseFixture(port = 0) {
     close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }
 
-function matches(row: Row, params: URLSearchParams) {
-  return Array.from(params).every(([field, filter]) => {
-    if (['select', 'order', 'limit', 'offset'].includes(field)) return true;
-    if (filter.startsWith('eq.')) return String(row[field]) === filter.slice(3);
-    if (filter.startsWith('in.(')) return filter.slice(4, -1).split(',').map(value => value.replace(/^"|"$/g, '')).includes(String(row[field]));
-    if (filter.startsWith('neq.')) return String(row[field]) !== filter.slice(4);
-    throw new TypeError(`Unsupported fixture filter: ${filter}`);
-  });
-}
 function parseRow(value: unknown): Row {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Expected fixture row');
   return Object.fromEntries(Object.entries(value));
@@ -163,3 +107,53 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 async function readBody(request: IncomingMessage) { return parseRow(await readJson(request)); }
+
+// Named PostgREST arguments from the public SQL wrappers. Only page options have defaults.
+const signatures: Record<string, readonly string[]> = {
+  rights_list_public_proposals: ['p_limit', 'p_cursor', 'p_query'],
+  rights_list_public_feedback: ['p_limit', 'p_cursor', 'p_query'],
+  rights_list_public_comments: ['p_proposal_id', 'p_limit', 'p_cursor'],
+  rights_list_home_sections: ['p_limit', 'p_cursor'],
+  rights_list_pending_proposals: ['p_limit', 'p_cursor'],
+  rights_list_admin_feedback: ['p_limit', 'p_cursor'],
+  rights_is_admin: [],
+  rights_get_public_item: ['p_kind', 'p_id'],
+  rights_admin_author: ['p_kind', 'p_id'],
+  rights_create_proposal: ['p_client_key', 'p_title', 'p_content', 'p_category'],
+  rights_create_feedback: ['p_client_key', 'p_title', 'p_content', 'p_category', 'p_is_anonymous'],
+  rights_add_comment: ['p_client_key', 'p_proposal_id', 'p_content', 'p_is_anonymous'],
+  rights_set_vote: ['p_proposal_id', 'p_voted'],
+  rights_update_proposal_control: ['p_id', 'p_status', 'p_reply', 'p_expected_version'],
+  rights_approve_proposal: ['p_id', 'p_expected_version'],
+  rights_reject_proposal: ['p_id', 'p_expected_version'],
+  rights_delete_proposal: ['p_id', 'p_expected_version'],
+  rights_delete_comment: ['p_id', 'p_proposal_id', 'p_expected_version'],
+  rights_save_feedback_reply: ['p_id', 'p_reply', 'p_expected_version'],
+  rights_delete_feedback: ['p_id', 'p_expected_version'],
+  rights_create_home_section: ['p_client_key', 'p_title', 'p_content'],
+  rights_delete_home_section: ['p_id', 'p_expected_version'],
+  rights_queue_page: ['p_kind', 'p_filter', 'p_limit', 'p_cursor', 'p_query'],
+};
+
+function validateArguments(name: string, body: Row) {
+  const keys = signatures[name];
+  const optional = ['p_limit', 'p_cursor', 'p_query'];
+  if (!keys || Object.keys(body).some(key => !keys.includes(key)) ||
+      keys.some(key => !(key in body) && !optional.includes(key))) {
+    throw new FixtureRpcError(400, 'Unknown RPC signature');
+  }
+  for (const [key, value] of Object.entries(body)) {
+    switch (key) {
+      case 'p_id': case 'p_proposal_id': case 'p_client_key': body[key] = uuid(value); break;
+      case 'p_limit': case 'p_expected_version':
+        if (!Number.isSafeInteger(value)) throw new FixtureRpcError(400, 'Invalid integer');
+        break;
+      case 'p_is_anonymous': case 'p_voted':
+        if (typeof value !== 'boolean') throw new FixtureRpcError(400, 'Invalid boolean');
+        break;
+      case 'p_cursor': break; // The page parser checks the nested JSON object.
+      default:
+        if (typeof value !== 'string') throw new FixtureRpcError(400, 'Invalid text');
+    }
+  }
+}

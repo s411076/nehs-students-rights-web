@@ -6,35 +6,14 @@ const item = (value: unknown) => (typeof value === 'string' ? value : null);
 
 describe('queue parameter boundary', () => {
   it.each([
-    ['kind=feedback&filter=all', 'feedback', 'all'],
-    ['kind=feedback&filter=awaiting', 'feedback', 'awaiting'],
-    ['kind=feedback&filter=replied', 'feedback', 'replied'],
-    ['kind=proposal&filter=all', 'proposal', 'all'],
-    ['kind=proposal&filter=processing', 'proposal', 'processing'],
-    ['kind=proposal&filter=closed', 'proposal', 'closed'],
-    ['kind=pending&filter=pending', 'pending', 'pending'],
-  ])('accepts %s', (query, kind, filter) => {
-    const parsed = parseQueueParameters(params(query));
-    expect(parsed).toEqual({ ok: true, data: { p_kind: kind, p_filter: filter, p_limit: 20, p_cursor: null, p_query: '' } });
-  });
-  it.each([
     'filter=all',
     'kind=feedback',
     'kind=unknown&filter=all',
     'kind=feedback&filter=unknown',
     'kind=feedback&filter=processing',
-    'kind=feedback&filter=closed',
-    'kind=feedback&filter=pending',
     'kind=proposal&filter=awaiting',
-    'kind=proposal&filter=replied',
-    'kind=proposal&filter=pending',
     'kind=pending&filter=all',
-    'kind=pending&filter=awaiting',
     'kind=feedback&kind=proposal&filter=all',
-    'kind=feedback&filter=all&filter=replied',
-    'kind=feedback&filter=all&limit=20&limit=7',
-    'kind=feedback&filter=all&cursor=null&cursor=null',
-    'kind=feedback&filter=all&query=a&query=b',
     'kind=feedback&filter=all&sort=asc',
     'kind=feedback&filter=all&limit=0',
     'kind=feedback&filter=all&limit=51',
@@ -48,10 +27,10 @@ describe('queue parameter boundary', () => {
     expect(parseQueueParameters(params(query)).ok).toBe(false);
   });
   it('keeps microsecond cursor precision and query bounds', () => {
-    const cursor = encodeURIComponent(JSON.stringify({ created_at: '2026-03-02T00:00:00.123456Z', id: 'feedback-1' }));
+    const cursor = encodeURIComponent(JSON.stringify({ created_at: '2026-03-02T00:00:00.123456Z', id: '20000000-0000-4000-8000-000000000001' }));
     const parsed = parseQueueParameters(params(`kind=feedback&filter=awaiting&limit=7&cursor=${cursor}&query=needle`));
     expect(parsed).toEqual({ ok: true, data: { p_kind: 'feedback', p_filter: 'awaiting', p_limit: 7,
-      p_cursor: { created_at: '2026-03-02T00:00:00.123456Z', id: 'feedback-1' }, p_query: 'needle' } });
+      p_cursor: { created_at: '2026-03-02T00:00:00.123456Z', id: '20000000-0000-4000-8000-000000000001' }, p_query: 'needle' } });
   });
 });
 

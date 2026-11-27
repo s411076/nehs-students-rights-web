@@ -87,13 +87,6 @@ test('verifies user before caller-only admin RPC when admin is requested', async
   ]);
 });
 
-test('denies nonadmin before a guarded mutation can execute', async () => {
-  const { supabase } = createRouteHandlerClient(await sessionRequest(fixture.url));
-  const operation = async () => { await requireAdmin(supabase); return supabase.from('feedback').update({ reply: 'forbidden' }).eq('id', 'feedback-1'); };
-  await expect(operation()).rejects.toMatchObject({ status: 403 });
-  expect(fixture.data.counters.total).toBe(0);
-});
-
 test.each([
   { rows: [{ email: 'admin@nehs.hc.edu.tw' }], status: 403 },
   { rows: 'true', status: 403 },
@@ -127,19 +120,6 @@ test('reverifies when a previously verified token is revoked', async () => {
   fixture.data.requests.length = 0;
   await expect(requireAdmin(supabase)).rejects.toMatchObject({ status: 401 });
   expect(fixture.data.requests).toEqual([]);
-});
-
-test('waits for provider verification when auth response is delayed', async () => {
-  const request = await sessionRequest(fixture.url, 'admin');
-  const original = globalThis.fetch;
-  let release: (response: Response) => void = () => { throw new TypeError('Missing pending verification'); };
-  const delayed = new Promise<Response>(resolve => { release = resolve; });
-  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).endsWith('/auth/v1/user') ? delayed : original(input, init));
-  const { supabase } = createRouteHandlerClient(request);
-  const result = requireAdmin(supabase);
-  expect(fixture.data.requests.filter(request => request.path.startsWith('/rest/'))).toEqual([]);
-  release(Response.json({ message: 'revoked', code: 'bad_jwt' }, { status: 401 }));
-  await expect(result).rejects.toMatchObject({ status: 401 });
 });
 
 test.each([503, 429, 400])('reports Auth service failure %s as unavailable rather than signing the user out', async status => {

@@ -23,6 +23,18 @@ INSERT INTO auth.users(id,email,email_confirmed_at,raw_user_meta_data,banned_unt
  ('10000000-0000-4000-8000-000000000016','deleted@nehs.hc.edu.tw',now(),'{}',NULL,false,now()),
  ('10000000-0000-4000-8000-000000000017','spoof@nehs.hc.edu.tw.evil.invalid',now(),'{}',NULL,false,NULL);
 INSERT INTO public.admins(email) VALUES ('admin-synthetic@nehs.hc.edu.tw');
+-- SQL execute grants and the identity checks inside a definer are separate boundaries.
+DO $$
+DECLARE f record;
+BEGIN
+  FOR f IN SELECT oid, proname FROM pg_proc WHERE pronamespace='public'::regnamespace
+    AND starts_with(proname, 'rights_') LOOP
+    PERFORM rights_test.assert(has_function_privilege('authenticated', f.oid, 'EXECUTE'), f.proname || ': authenticated grant');
+    PERFORM rights_test.assert(has_function_privilege('anon', f.oid, 'EXECUTE') = (f.proname IN (
+      'rights_is_admin','rights_get_public_item','rights_list_public_proposals','rights_list_public_feedback',
+      'rights_list_public_comments','rights_list_home_sections','rights_queue_page')), f.proname || ': guest grant');
+  END LOOP;
+END $$;
 INSERT INTO public.proposals(id,title,content,status,author_name,is_anonymous,upvotes_count,legacy_upvotes_count)
  VALUES ('20000000-0000-4000-8000-000000000001','synthetic concurrency','synthetic content','處理中','Legacy synthetic label',false,37,37),
  ('20000000-0000-4000-8000-000000000002','synthetic pending','synthetic content','待審核','Legacy synthetic label',false,0,0),
@@ -115,6 +127,18 @@ BEGIN
 END $$;
 SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
 SELECT rights_test.assert(NOT public.rights_is_admin(),'student not admin despite forged claims');
+DO $$
+DECLARE call text; id uuid := '20000000-0000-4000-8000-000000000001';
+BEGIN
+  FOREACH call IN ARRAY ARRAY[
+    'rights_update_proposal_control($1,''處理中'','''',1)', 'rights_approve_proposal($1,1)',
+    'rights_reject_proposal($1,1)', 'rights_delete_proposal($1,1)', 'rights_delete_comment($1,$1,1)',
+    'rights_save_feedback_reply($1,''reply'',1)', 'rights_delete_feedback($1,1)',
+    'rights_create_home_section($1,''title'',''body'')', 'rights_delete_home_section($1,1)'
+  ] LOOP
+    PERFORM rights_test.throws('SELECT public.' || replace(call,'$1',quote_literal(id)), 'PT403');
+  END LOOP;
+END $$;
 SELECT rights_test.throws($q$SELECT public.rights_admin_author('proposal','20000000-0000-4000-8000-000000000001')$q$,'PT403');
 SELECT rights_test.throws($q$SELECT public.rights_list_pending_proposals()$q$,'PT403');
 SELECT rights_test.throws($q$SELECT public.rights_list_admin_feedback()$q$,'PT403');
@@ -131,6 +155,27 @@ BEGIN
   PERFORM rights_test.throws(format('SELECT public.rights_create_proposal(%L,%L,%L,%L)',k,'retry','changed','其他'),'PT409');
   PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000002',true);
   PERFORM rights_test.assert(public.rights_create_proposal(k,'retry','body','其他')->>'id'<>receipt->>'id','caller-scoped key');
+  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
+END $$;
+
+-- Every create wrapper participates, including after an admin changes the row version.
+DO $$
+DECLARE k uuid:=gen_random_uuid(); first_receipt jsonb; repeated jsonb; call text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000010',true);
+  FOREACH call IN ARRAY ARRAY[
+    'rights_create_feedback($1,''retry'',$2,''其他'',true)',
+    'rights_add_comment($1,''20000000-0000-4000-8000-000000000001'',$2,true)',
+    'rights_create_home_section($1,''retry'',$2)'
+  ] LOOP
+    EXECUTE 'SELECT public.' || call INTO first_receipt USING k,'original';
+    IF starts_with(call,'rights_create_feedback') THEN
+      PERFORM public.rights_save_feedback_reply((first_receipt->>'id')::uuid,'moderated',1);
+    END IF;
+    EXECUTE 'SELECT public.' || call INTO repeated USING k,'original';
+    PERFORM rights_test.assert(repeated=first_receipt, call || ': replay original receipt');
+    PERFORM rights_test.throws('SELECT public.' || replace(replace(call,'$1',quote_literal(k)),'$2',quote_literal('changed')), 'PT409');
+  END LOOP;
   PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
 END $$;
 

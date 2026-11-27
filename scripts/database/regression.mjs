@@ -1,8 +1,9 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadMigrationChain } from './migrations.mjs';
+import { checkConcurrency } from './concurrency.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const container = 'database-recovery-parity-20261016';
@@ -54,49 +55,13 @@ console.log('PASS: synthetic authorization, projection, pagination, version, aud
 sql(db, file('tests/database/queues.sql'));
 console.log('PASS: filtered queue totals, ordering, leakage and pending gates');
 
-function concurrent(input, onReady) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn('docker', [...psql, '-d', db], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stderr = '';
-    let output = '';
-    child.stdout.on('data', (chunk) => {
-      output += chunk;
-      if (output.includes('rights_lock_held')) onReady?.();
-    });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('close', (code) => code === 0 ? resolvePromise() : reject(new Error(`Concurrent SQL failed (${stderr.match(/ERROR:\s+([A-Z0-9]{5})/u)?.[1] ?? 'LOCAL_PROCESS'}); raw output withheld`)));
-    child.stdin.end(`\\set VERBOSITY sqlstate\n${input}`);
-  });
-}
-const proposal = '20000000-0000-4000-8000-000000000001';
-const voter = (n) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-function vote(user, value, delay = 0) {
-  return `BEGIN; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claim.sub='${user}'; SELECT public.rights_set_vote('${proposal}',${value}); SELECT 'rights_lock_held'; SELECT pg_sleep(${delay}); COMMIT;`;
-}
-const createKey = '40000000-0000-4000-8000-000000000001';
-const create = `SET ROLE authenticated; SET request.jwt.claim.sub='${voter(1)}'; SELECT public.rights_create_proposal('${createKey}','Concurrent create','body','其他');`;
-await Promise.all(Array.from({ length: 8 }, () => concurrent(create)));
-sql(db, `SELECT rights_test.assert((SELECT count(*) FROM public.proposals WHERE user_id='${voter(1)}' AND title='[其他] Concurrent create')=1,'concurrent creates insert once');`);
-await Promise.all(Array.from({ length: 8 }, () => concurrent(vote(voter(1), true))));
-sql(db, `DO $$ BEGIN IF (SELECT count(*) FROM rights_private.proposal_ballots WHERE proposal_id='${proposal}')<>1 THEN RAISE EXCEPTION 'Duplicate concurrent votes'; END IF; END $$;`);
-await Promise.all(Array.from({ length: 6 }, (_, n) => concurrent(vote(voter(n + 1), true))));
-sql(db, `DO $$ BEGIN IF (SELECT count(*) FROM rights_private.proposal_ballots WHERE proposal_id='${proposal}')<>6 THEN RAISE EXCEPTION 'Lost concurrent vote'; END IF; END $$;`);
-await Promise.all(Array.from({ length: 6 }, (_, n) => concurrent(vote(voter(n + 1), false))));
-// Hold a lock in one connection; a second desired-state cancellation must wait.
-let notifyReady;
-const ready = new Promise((done) => { notifyReady = done; });
-const held = concurrent(vote(voter(1), true, 1), notifyReady);
-await Promise.race([ready, held.then(() => { throw new Error('Lock readiness marker missing'); })]);
-await Promise.all([held, concurrent(vote(voter(1), false))]);
-sql(db, `DO $$ BEGIN IF EXISTS (SELECT 1 FROM rights_private.proposal_ballots WHERE proposal_id='${proposal}') OR rights_private.total('${proposal}',37)<>37 THEN RAISE EXCEPTION 'Concurrent cancellation or baseline'; END IF; END $$;`);
-console.log('PASS: 8 same-user connections, 6 distinct-user connections, cancellation, serialized true→false and immutable baseline');
+await checkConcurrency(container, db, sql);
 console.log('PASS: all local database gates; retained disposable DB for parent HTTP gates');
 writeFileSync(resolve(root, `tests/database/verification-${clone ? 'restored' : 'synthetic'}.json`), `${JSON.stringify({
   command: `node scripts/database/regression.mjs${clone ? ' --restored' : ''}`,
   container, database: db, template: clone ? 'recovery' : 'template0',
   migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
-  passed: ['legacy-preservation', 'migration-application', 'authorization', 'projection', 'pagination', 'unicode-null-type-boundaries', 'versions-audit', 'multi-connection-votes'],
+  passed: ['legacy-preservation', 'migration-application', 'authorization', 'projection', 'pagination', 'unicode-null-type-boundaries', 'versions-audit', 'multi-connection-creates', 'multi-connection-votes'],
   completedAt: new Date().toISOString(),
   productionConnection: false, recoveredRowsOutput: false,
 }, null, 2)}\n`);

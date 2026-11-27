@@ -28,7 +28,7 @@ export function ProposalComments({ item }: { readonly item: ProposalDTO }) {
   return <div className="space-y-3 pt-1">
     <div className="text-xs font-bold text-gray-700 dark:text-neutral-300 flex items-center gap-1"><MessageSquareText aria-hidden="true" size={14} className="shrink-0" /> 討論與留言（已載入 {rows.length} 筆）</div>
     <ActionFeedback {...mutation.feedback} />
-    {mutation.error && <button type="button" onClick={() => void comments.refresh()}
+    {(mutation.error || mutation.guidance) && <button type="button" onClick={() => void comments.refresh()}
       className={ui.secondaryButton}>更新留言清單</button>}
     {comments.status === 'loading' && <p role="status" className="text-xs text-gray-500 dark:text-neutral-400">留言載入中…</p>}
     {comments.status === 'error' && <div className="flex flex-wrap items-center gap-2 text-xs">

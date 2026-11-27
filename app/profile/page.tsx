@@ -108,8 +108,7 @@ export default function ProfilePage() {
           data-testid="profile-ownership-unavailable"
           className="text-sm text-gray-500 dark:text-neutral-400 leading-relaxed"
         >
-          目前無法可靠列出本人提案：提案僅以顯示名稱記載作者，沒有穩定的作者識別碼，無法以姓名或信箱準確比對，相似名稱也可能是其他同學。因此在作者 UUID
-          支援之前，不會以姓名或信箱比對來認領提案。
+          這裡暫時無法顯示你的提案清單。你的提案經管理員審核通過後，會公開顯示在學生提案區；待審核的提案不會公開。
         </p>
       </div>
     </main>

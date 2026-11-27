@@ -115,7 +115,7 @@ test('student resends a pending proposal after its receipt is lost', async ({ pa
   }, { times: 1 });
   const send = page.getByRole('button', { name: '送出提案' });
   await send.click();
-  await expect(page.locator('main').getByRole('alert')).toContainText('可以再次送出未修改的草稿，不會重複新增');
+  await expect(page.locator('main').getByRole('status').filter({ hasText: '可以再次送出未修改的草稿，不會重複新增' })).toBeVisible();
 
   await send.click();
   await expect(page.getByLabel('提案標題')).toHaveValue('');
@@ -136,7 +136,7 @@ test('editing an uncertain proposal draft starts a distinct submission', async (
     await route.abort('failed');
   }, { times: 1 });
   await send.click();
-  await expect(page.locator('main').getByRole('alert')).toContainText('可以再次送出未修改的草稿');
+  await expect(page.locator('main').getByRole('status').filter({ hasText: '可以再次送出未修改的草稿' })).toBeVisible();
   await title.fill('Revised draft');
   await send.click();
   await expect(title).toHaveValue('');

@@ -165,8 +165,8 @@ export default function Navbar() {
         aria-modal={isOpen ? true : undefined}
         aria-label="導覽選單"
         inert={!isOpen}
-        className={`fixed top-0 left-0 bottom-0 w-72 max-w-full max-h-dvh overflow-y-auto overscroll-contain ${ui.surface} z-50 shadow-2xl transform transition-transform duration-300 ease-in-out motion-reduce:transition-opacity motion-reduce:translate-x-0 border-r ${ui.border} flex flex-col justify-between ${
-          isOpen ? 'translate-x-0' : '-translate-x-full motion-reduce:opacity-0'
+        className={`fixed top-0 left-0 bottom-0 w-72 max-w-full max-h-dvh overflow-y-auto overscroll-contain ${ui.surface} z-50 transform transition-transform duration-300 ease-in-out motion-reduce:transition-opacity motion-reduce:translate-x-0 border-r ${ui.border} flex flex-col justify-between ${
+          isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full motion-reduce:opacity-0'
         }`}
       >
         <div className="shrink-0">

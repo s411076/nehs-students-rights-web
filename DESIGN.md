@@ -85,6 +85,8 @@ Use the existing Tailwind spacing scale (base `1` = 4px): `2` = 8px, `3` = 12px,
 
 `ActionFeedback` retains alert/status semantics. `PageContinuation` retains its `min-h-11`, rounded neutral surface, disabled state, and blue focus ring, using the shared secondary-button recipe.
 
+Uncertain create guidance uses `ui.guidance`: `rounded-xl p-3 text-sm text-foreground` on the existing neutral wash (`neutral-100` light / `neutral-800` dark; 16.27:1 / 13.81:1 text contrast). Standalone composers announce it through a polite `status` region. Shared comment operations announce it once in the page's existing polite region and show the same guidance inline. Errors retain their red treatment.
+
 ### Page-owned operation lifecycle
 
 - `/feedback` and `/proposals` extend the existing identity-generation-scoped draft owner with operation slots and authoritative ballot snapshots, using the existing in-memory map store. Explicit logical keys (`reply:id`, `control:id`, `vote:id`, `review:id`, plus item deletion and comment keys) retain pending/result/error/uncertain state through tab filtering. Approve/reject share one review flight. No inactive cards stay mounted, no mutation replays automatically, and a second invocation during a flight neither POSTs nor acknowledges again.

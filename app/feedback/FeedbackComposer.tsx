@@ -17,7 +17,7 @@ export function FeedbackComposer({ refresh }: { readonly refresh: () => Promise<
   const [isAnonymous, setIsAnonymous] = useState(false);
   if (!isLoggedIn) return <div className={`${ui.card} p-4 text-center text-sm font-semibold text-gray-500 dark:text-neutral-400 flex items-center justify-center gap-2`}><LockKeyhole aria-hidden="true" className="size-4 shrink-0" /> 請登入後即可發表建言</div>;
   return <div className={`${ui.card} p-6 space-y-4`}>
-    <ActionFeedback error={mutation.error} notice={mutation.notice} />
+    <ActionFeedback {...mutation.feedback} />
     <form onChange={mutation.resetCreateKey} onSubmit={event => {
       event.preventDefault();
       void mutation.run({ action: 'createFeedback', payload: { clientKey: mutation.createKey(), title, content, category, isAnonymous } }, refresh).then(result => {

@@ -32,7 +32,7 @@ export function useRightsMutation(target?: OperationTarget) {
     else { slot.write(next); recoverFocus?.(null); }
   };
   const setError = (error: string) => {
-    if (!owner.signal.aborted) publish({ ...(slot.read() ?? EMPTY_OPERATION), error });
+    if (!owner.signal.aborted) publish({ ...(slot.read() ?? EMPTY_OPERATION), error, guidance: '' });
   };
   const setNotice = (notice: string) => {
     if (!owner.signal.aborted) publish({ ...(slot.read() ?? EMPTY_OPERATION), notice });
@@ -78,12 +78,13 @@ export function useRightsMutation(target?: OperationTarget) {
       if ('clientKey' in parsed.data.payload) resetCreateKey();
       acknowledge?.(result.data);
     }
-    const error = result.ok ? '' : result.code === 'CONFLICT' ? CONFLICT_DRAFT_MESSAGE : result.message;
+    const guidance = !result.ok && result.code === 'OUTCOME_UNKNOWN' && 'clientKey' in parsed.data.payload ? result.message : '';
+    const error = result.ok || guidance ? '' : result.code === 'CONFLICT' ? CONFLICT_DRAFT_MESSAGE : result.message;
     const notice = result.ok ? result.refresh === 'failed' ? result.message ?? '已儲存，但清單更新失敗' : '操作已成功完成。' : '';
-    publish({ busy: false, error, notice, result, flight }, recoverFocus);
+    publish({ busy: false, error, guidance, notice, result, flight }, recoverFocus);
     return result;
   };
   return { run, createKey, resetCreateKey, ...state, setError, setNotice, owner, canWrite: verification.canWrite, checkReady,
-    feedback: { error: state.error, notice: owner.pageFeedback ? '' : state.notice, announce: !owner.pageFeedback },
+    feedback: { error: state.error, guidance: state.guidance, notice: owner.pageFeedback ? '' : state.notice, announce: !owner.pageFeedback },
   };
 }

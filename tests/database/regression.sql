@@ -133,6 +133,25 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000001',true);
 END $$;
 
+-- Commit the create and delete separately to model a lost create response.
+SELECT gen_random_uuid() AS removed_create_key \gset
+SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_receipt \gset
+COMMIT;
+SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000010';
+SELECT rights_test.assert(public.rights_delete_proposal(
+  (:'removed_create_receipt'::jsonb->>'id')::uuid,1)->>'deleted'='true','admin removed the committed proposal');
+BEGIN;
+SET request.jwt.claim.sub='10000000-0000-4000-8000-000000000001';
+SELECT public.rights_create_proposal(:'removed_create_key','removed before resend','body','其他') AS removed_create_resend \gset
+RESET ROLE;
+SELECT rights_test.assert(NOT EXISTS (
+  SELECT 1 FROM public.proposals WHERE title='[其他] removed before resend'
+),'resending a deleted proposal does not insert a replacement');
+SELECT rights_test.assert(:'removed_create_resend'::jsonb=:'removed_create_receipt'::jsonb,'resend after deletion returns the original receipt');
+SET ROLE authenticated;
+SELECT rights_test.throws(format('SELECT public.rights_create_proposal(%L,%L,%L,%L)',
+  :'removed_create_key','removed before resend','changed','其他'),'PT409');
+
 DO $$
 DECLARE j jsonb; c uuid; f uuid; p uuid;
 BEGIN

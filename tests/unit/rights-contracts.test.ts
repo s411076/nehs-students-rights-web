@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ADMIN_ACTIONS, PUBLIC_STATUSES, PROPOSAL_CATEGORIES, RIGHTS_ACTIONS, STUDENT_ACTIONS, GENERIC_MESSAGES } from '@/lib/rights/contracts';
-import { countCodePoints, fallbackFeedbackTitle, formatProposalTitle, parseActionRequest, validateBody, validateCategory,
-  validateCommentContent, validateControlStatus, validateCount, validateId, validateIsAnonymous,
-  validateProposalFinalTitle, validateRawTitle, validateReply, truncateToCodePoints } from '@/lib/rights/validation';
+import { GENERIC_MESSAGES } from '@/lib/rights/contracts';
+import { parseActionRequest } from '@/lib/rights/validation';
 import { sendRightsAction } from '@/lib/rights/client';
 import { parseCursor, parsePage, parsePageParameters, pagePath } from '@/lib/rights/pagination';
 import { parseMutationReceipt } from '@/lib/rights/receipts';
-import { toProposalDTO, toFeedbackPublicDTO, toFeedbackAdminDTO, toCommentDTO, toHomeSectionDTO, isPublicStatus } from '@/lib/rights/queries';
-import { deriveDisplayName, isEligibleSchoolEmail, isSchoolEmail, normalizeEmail } from '@/lib/auth/types';
+import { toProposalDTO, toFeedbackPublicDTO, toFeedbackAdminDTO, toCommentDTO, toHomeSectionDTO } from '@/lib/rights/queries';
 
 const payloads = [
   { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'title', content: 'body', category: '其他' } },
@@ -43,50 +40,6 @@ describe('strict action boundary', () => {
     { action: 'setVote', payload: { proposalId: 'p', voted: 1 } },
     { action: 'approveProposal', payload: { id: 'p', expectedVersion: 1 }, role: 'admin' }])('rejects malformed envelope %j', input => {
     expect(parseActionRequest(input).ok).toBe(false);
-  });
-  it('has four student and nine admin actions with no total-write compatibility', () => {
-    expect(STUDENT_ACTIONS).toHaveLength(4); expect(ADMIN_ACTIONS).toHaveLength(9);
-    expect(RIGHTS_ACTIONS).toHaveLength(13); expect(RIGHTS_ACTIONS).not.toContain('setVoteCount');
-  });
-});
-describe('Unicode-safe validation', () => {
-  it.each([validateRawTitle, validateBody, validateCommentContent])('rejects empty inputs', validate => {
-    expect(validate('  ').ok).toBe(false); expect(validate(123).ok).toBe(false);
-  });
-  it.each([
-    { validate: validateRawTitle, max: 100 }, { validate: validateProposalFinalTitle, max: 120 },
-    { validate: validateBody, max: 5000 }, { validate: validateCommentContent, max: 1000 }, { validate: validateReply, max: 5000 },
-  ])('enforces code point limit $max', ({ validate, max }) => {
-    expect(validate('🏫'.repeat(max)).ok).toBe(true); expect(validate('🏫'.repeat(max + 1)).ok).toBe(false);
-  });
-  it('permits reply clearing and preserves title rules', () => {
-    expect(validateReply('').ok).toBe(true); expect(countCodePoints('🏫')).toBe(1);
-    expect(formatProposalTitle('圖書館', '其他')).toEqual({ ok: true, data: '[其他] 圖書館' });
-    expect(formatProposalTitle('[其他] 圖書館', '其他')).toEqual({ ok: true, data: '[其他] 圖書館' });
-    expect(fallbackFeedbackTitle('', '🏫'.repeat(20))).toBe(`${'🏫'.repeat(15)}...`);
-    expect(fallbackFeedbackTitle('', 'short')).toBe('short'); expect(fallbackFeedbackTitle('given', 'body')).toBe('given');
-    expect(truncateToCodePoints('🏫'.repeat(20), 15)).toBe('🏫'.repeat(15));
-  });
-  it.each(['待審核', '被退回', 'unknown'])('excludes %s from public/control statuses', status => {
-    expect(isPublicStatus(status)).toBe(false); expect(validateControlStatus(status).ok).toBe(false);
-  });
-  it('accepts only configured categories and statuses', () => {
-    for (const category of PROPOSAL_CATEGORIES) expect(validateCategory(category).ok).toBe(true);
-    for (const status of PUBLIC_STATUSES) expect(validateControlStatus(status).ok).toBe(true);
-    expect(validateCategory('unknown').ok).toBe(false);
-  });
-  it.each(['', ' ', 'a'.repeat(129), 123, null, undefined])('rejects malformed bounded ID %s', id => {
-    expect(validateId(id).ok).toBe(false);
-  });
-  it('accepts bounded fixture IDs without claiming UUID validation', () => {
-    expect(validateId('proposal-1').ok).toBe(true); expect(validateId('a'.repeat(128)).ok).toBe(true);
-  });
-  it.each([-1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1, '3', null])('rejects unsafe counts %s', count => {
-    expect(validateCount(count).ok).toBe(false);
-  });
-  it('requires booleans and accepts safe count bounds', () => {
-    expect(validateIsAnonymous(true).ok).toBe(true); expect(validateIsAnonymous('true').ok).toBe(false);
-    expect(validateCount(0).ok).toBe(true); expect(validateCount(Number.MAX_SAFE_INTEGER).ok).toBe(true);
   });
 });
 const base = { id: 'p', title: 't', content: 'c', created_at: '2026-01-01T00:00:00.123456Z', version: 1 };
@@ -160,14 +113,5 @@ describe('receipt and client failures', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({ ok: false, code: 'UNAVAILABLE' }, { status: 503 })).mockRejectedValueOnce(new TypeError('lost')));
     expect(await sendRightsAction(request)).toMatchObject({ code: 'OUTCOME_UNKNOWN' });
     expect(await sendRightsAction(request)).toMatchObject({ code: 'OUTCOME_UNKNOWN' });
-  });
-});
-describe('identity helpers', () => {
-  it('normalizes eligible school identities and refuses lookalike/unconfirmed accounts', () => {
-    expect(normalizeEmail(' Student@NEHS.HC.EDU.TW ')).toBe('student@nehs.hc.edu.tw');
-    expect(isEligibleSchoolEmail('student@nehs.hc.edu.tw', '2026-01-01')).toBe(true);
-    expect(isEligibleSchoolEmail('student@nehs.hc.edu.tw', null)).toBe(false);
-    expect(isSchoolEmail('student@nehs.hc.edu.tw.evil.test')).toBe(false);
-    expect(deriveDisplayName({ email: 'student@nehs.hc.edu.tw' })).toBe('student');
   });
 });

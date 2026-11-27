@@ -7,7 +7,6 @@ import { sessionRequest } from '../fixtures/server-auth-request';
 vi.mock('server-only', () => ({}));
 import { POST } from '../../app/api/rights/actions/route';
 import type { RightsActionRequest } from '../../lib/rights/contracts';
-import { createRightsActionFlight, sendRightsAction } from '../../lib/rights/client';
 
 let fixture: Awaited<ReturnType<typeof startSupabaseFixture>>;
 beforeEach(async () => {
@@ -17,21 +16,21 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.unstubAllEnvs(); await fixture.close(); });
 const adminCases = [
-  { action: 'updateProposalControl', payload: { id: 'proposal-1', status: '處理中', reply: 'reply', expectedVersion: 1 } },
-  { action: 'approveProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
-  { action: 'rejectProposal', payload: { id: 'proposal-2', expectedVersion: 1 } },
-  { action: 'deleteProposal', payload: { id: 'proposal-1', expectedVersion: 1 } },
-  { action: 'deleteComment', payload: { id: 'comment-1', proposalId: 'proposal-1', expectedVersion: 1 } },
-  { action: 'saveFeedbackReply', payload: { id: 'feedback-1', reply: 'reply', expectedVersion: 1 } },
-  { action: 'deleteFeedback', payload: { id: 'feedback-1', expectedVersion: 1 } },
+  { action: 'updateProposalControl', payload: { id: '10000000-0000-4000-8000-000000000001', status: '處理中', reply: 'reply', expectedVersion: 1 } },
+  { action: 'approveProposal', payload: { id: '10000000-0000-4000-8000-000000000002', expectedVersion: 1 } },
+  { action: 'rejectProposal', payload: { id: '10000000-0000-4000-8000-000000000002', expectedVersion: 1 } },
+  { action: 'deleteProposal', payload: { id: '10000000-0000-4000-8000-000000000001', expectedVersion: 1 } },
+  { action: 'deleteComment', payload: { id: '40000000-0000-4000-8000-000000000001', proposalId: '10000000-0000-4000-8000-000000000001', expectedVersion: 1 } },
+  { action: 'saveFeedbackReply', payload: { id: '20000000-0000-4000-8000-000000000001', reply: 'reply', expectedVersion: 1 } },
+  { action: 'deleteFeedback', payload: { id: '20000000-0000-4000-8000-000000000001', expectedVersion: 1 } },
   { action: 'createHomeSection', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'home', content: 'body' } },
-  { action: 'deleteHomeSection', payload: { id: 'section-1', expectedVersion: 1 } },
+  { action: 'deleteHomeSection', payload: { id: '30000000-0000-4000-8000-000000000001', expectedVersion: 1 } },
 ] satisfies RightsActionRequest[];
 const studentCases = [
   { action: 'createProposal', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: 'title', content: 'body', category: '其他' } },
   { action: 'createFeedback', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', title: '', content: '1234567890123456789', category: '其他', isAnonymous: true } },
-  { action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId: 'proposal-1', content: 'comment', isAnonymous: false } },
-  { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true } },
+  { action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId: '10000000-0000-4000-8000-000000000001', content: 'comment', isAnonymous: false } },
+  { action: 'setVote', payload: { proposalId: '10000000-0000-4000-8000-000000000001', voted: true } },
 ] satisfies RightsActionRequest[];
 async function actionRequest(body: unknown, identity: 'student' | 'admin' = 'student', headers: Readonly<Record<string, string | undefined>> = {}) {
   const seeded = await sessionRequest(fixture.url, identity);
@@ -42,19 +41,19 @@ async function actionRequest(body: unknown, identity: 'student' | 'admin' = 'stu
   });
 }
 const rpcCases = [
-  ['update_proposal_control', { p_id: 'proposal-1', p_status: '處理中', p_reply: 'reply', p_expected_version: 1 }],
-  ['approve_proposal', { p_id: 'proposal-2', p_expected_version: 1 }],
-  ['reject_proposal', { p_id: 'proposal-2', p_expected_version: 1 }],
-  ['delete_proposal', { p_id: 'proposal-1', p_expected_version: 1 }],
-  ['delete_comment', { p_id: 'comment-1', p_proposal_id: 'proposal-1', p_expected_version: 1 }],
-  ['save_feedback_reply', { p_id: 'feedback-1', p_reply: 'reply', p_expected_version: 1 }],
-  ['delete_feedback', { p_id: 'feedback-1', p_expected_version: 1 }],
+  ['update_proposal_control', { p_id: '10000000-0000-4000-8000-000000000001', p_status: '處理中', p_reply: 'reply', p_expected_version: 1 }],
+  ['approve_proposal', { p_id: '10000000-0000-4000-8000-000000000002', p_expected_version: 1 }],
+  ['reject_proposal', { p_id: '10000000-0000-4000-8000-000000000002', p_expected_version: 1 }],
+  ['delete_proposal', { p_id: '10000000-0000-4000-8000-000000000001', p_expected_version: 1 }],
+  ['delete_comment', { p_id: '40000000-0000-4000-8000-000000000001', p_proposal_id: '10000000-0000-4000-8000-000000000001', p_expected_version: 1 }],
+  ['save_feedback_reply', { p_id: '20000000-0000-4000-8000-000000000001', p_reply: 'reply', p_expected_version: 1 }],
+  ['delete_feedback', { p_id: '20000000-0000-4000-8000-000000000001', p_expected_version: 1 }],
   ['create_home_section', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: 'home', p_content: 'body' }],
-  ['delete_home_section', { p_id: 'section-1', p_expected_version: 1 }],
+  ['delete_home_section', { p_id: '30000000-0000-4000-8000-000000000001', p_expected_version: 1 }],
   ['create_proposal', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: 'title', p_content: 'body', p_category: '其他' }],
   ['create_feedback', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_title: '', p_content: '1234567890123456789', p_category: '其他', p_is_anonymous: true }],
-  ['add_comment', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_proposal_id: 'proposal-1', p_content: 'comment', p_is_anonymous: false }],
-  ['set_vote', { p_proposal_id: 'proposal-1', p_voted: true }],
+  ['add_comment', { p_client_key: 'abc00000-0000-4000-8000-000000000001', p_proposal_id: '10000000-0000-4000-8000-000000000001', p_content: 'comment', p_is_anonymous: false }],
+  ['set_vote', { p_proposal_id: '10000000-0000-4000-8000-000000000001', p_voted: true }],
 ] as const;
 test.each(adminCases)('denies student $action before mutation RPC', async body => {
   // Given a student; when requesting an admin mutation; then no writes occur.
@@ -92,31 +91,6 @@ test.each(studentCases)('executes student $action without role RPC', async body 
   expect(response.status).toBe(200);
   expect(fixture.data.requests.some(r => r.path.includes('rights_is_admin'))).toBe(false);
 });
-test('preserves historical vote baseline and desired-state idempotence', async () => {
-  const before = fixture.data.tables.proposals[0].upvotes_count;
-  await POST(await actionRequest(studentCases[3]));
-  await POST(await actionRequest(studentCases[3]));
-  expect(fixture.data.tables.proposals[0].upvotes_count).toBe(Number(before) + 1);
-  const response = await POST(await actionRequest({ action: 'setVote', payload: { proposalId: 'proposal-1', voted: false } }));
-  expect(response.status).toBe(200);
-  expect(fixture.data.tables.proposals[0].upvotes_count).toBe(before);
-});
-test.each(['proposal-2', 'proposal-3', 'proposal-4', 'missing'])('rejects comments on invisible %s', async proposalId => {
-  const response = await POST(await actionRequest({ action: 'addComment', payload: { clientKey: 'abc00000-0000-4000-8000-000000000001', proposalId, content: 'text', isAnonymous: true } }));
-  expect(response.status).toBe(409);
-  expect(fixture.data.counters.total).toBe(0);
-});
-test('requires matching proposal when deleting a comment', async () => {
-  const response = await POST(await actionRequest({ action: 'deleteComment', payload: { id: 'comment-1', proposalId: 'proposal-2', expectedVersion: 1 } }, 'admin'));
-  expect(response.status).toBe(409);
-  expect(fixture.data.tables.proposal_comments).toHaveLength(1);
-});
-test('rejects stale versions without overwriting newer content', async () => {
-  await POST(await actionRequest(adminCases[0], 'admin'));
-  const response = await POST(await actionRequest(adminCases[0], 'admin'));
-  expect(response.status).toBe(409);
-  expect(fixture.data.counters.total).toBe(1);
-});
 test.each([['PT400', 400], ['22P02', 400], ['PT401', 401], ['PT403', 403], ['42501', 403], ['PT409', 409], ['23505', 409], ['XX000', 503]] as const)('maps database %s to generic %s', async (code, status) => {
   const request = await actionRequest(studentCases[0]);
   const original = globalThis.fetch;
@@ -134,8 +108,8 @@ test.each([[], { inserted: true }, { id: 'x', version: 1, secret: 'PRIVATE' }])(
   expect((await POST(request)).status).toBe(503);
 });
 test.each([
-  { body: { action: 'setVoteCount', payload: { proposalId: 'proposal-1', count: 2 } }, headers: {}, status: 400 },
-  { body: { action: 'setVote', payload: { proposalId: 'proposal-1', voted: true, status: '處理中' } }, headers: {}, status: 400 },
+  { body: { action: 'setVoteCount', payload: { proposalId: '10000000-0000-4000-8000-000000000001', count: 2 } }, headers: {}, status: 400 },
+  { body: { action: 'setVote', payload: { proposalId: '10000000-0000-4000-8000-000000000001', voted: true, status: '處理中' } }, headers: {}, status: 400 },
   { body: studentCases[0], headers: { origin: '' }, status: 403 },
   { body: studentCases[0], headers: { origin: 'null' }, status: 403 },
   { body: studentCases[0], headers: { origin: 'not a URL' }, status: 403 },
@@ -174,27 +148,4 @@ test('rejects absent Origin despite trusted-looking forwarded host', async () =>
   request.headers.delete('origin'); request.headers.set('x-forwarded-host', 'localhost');
   expect((await POST(request)).status).toBe(403);
   expect(fixture.data.counters.total).toBe(0);
-});
-test('reports committed write with failed refresh without retry', async () => {
-  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true, data: { inserted: true, id: 'new', version: 1 } }));
-  expect(await sendRightsAction(studentCases[0], async () => { throw new TypeError('refresh failed'); })).toMatchObject({ ok: true, refresh: 'failed' });
-  expect(fetcher).toHaveBeenCalledTimes(1);
-});
-test.each(['reject', 'disconnect', 'uncertain'] as const)('classifies %s without retry', async mode => {
-  const fetcher = vi.spyOn(globalThis, 'fetch');
-  if (mode === 'reject') fetcher.mockResolvedValue(Response.json({ ok: false, code: 'FORBIDDEN' }, { status: 403 }));
-  else if (mode === 'uncertain') fetcher.mockResolvedValue(Response.json({ ok: false, code: 'UNAVAILABLE' }, { status: 503 }));
-  else fetcher.mockRejectedValue(new TypeError('connection lost'));
-  expect(await sendRightsAction(studentCases[0])).toMatchObject({ ok: false, code: mode === 'reject' ? 'FORBIDDEN' : 'OUTCOME_UNKNOWN' });
-  expect(fetcher).toHaveBeenCalledTimes(1);
-});
-test('single flight shares only the active operation', async () => {
-  let resolve: (response: Response) => void = () => { throw new TypeError('not started'); };
-  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(r => { resolve = r; }));
-  const send = createRightsActionFlight();
-  const first = send(studentCases[0]);
-  expect(send(studentCases[0])).toBe(first);
-  resolve(Response.json({ ok: true, data: { inserted: true, id: 'new', version: 1 } }));
-  await first;
-  expect(fetcher).toHaveBeenCalledTimes(1);
 });

@@ -4,7 +4,7 @@ A campus website for student proposals, petitions, feedback, and announcements, 
 
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React-19-blue)](https://react.dev)
-[![Node >= 20](https://img.shields.io/badge/Node-%3E%3D20-green)](https://nodejs.org)
+[![Node.js 22.22.2 minimum](https://img.shields.io/badge/Node.js-22.22.2%20minimum-green)](https://nodejs.org)
 
 Traditional Chinese version: [中文版](./README.zh-TW.md)
 
@@ -21,7 +21,7 @@ Traditional Chinese version: [中文版](./README.zh-TW.md)
 
 Prerequisites:
 
-- Node.js 20.9 or later (required by Next.js 16); the bundled npm is fine.
+- Node.js 22.22.2+ in the 22.x series, 24.15.0+ in the 24.x series, or 26.0.0 or later (required by the locked dependencies). Use `nvm install` to select the version in `.nvmrc`; the bundled npm is fine.
 - A Supabase project providing the project URL and publishable (anon) key. Local development and testing use only the public key, never the service-role key.
 
 Environment setup:
@@ -59,6 +59,7 @@ npm run test
 npm run typecheck
 npm run lint
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_offline_fixture_only NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture_only NEXT_FONT_GOOGLE_MOCKED_RESPONSES=tests/fixtures/google-fonts.cjs npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
@@ -132,6 +133,7 @@ in `playwright.config.ts` and `tests/fixtures/`; never paste a real secret anywh
 
 ```bash
 npm ci
+npx playwright install chromium
 npm run check
 npm run check:db
 ```

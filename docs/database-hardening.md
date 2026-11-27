@@ -98,9 +98,11 @@ migration 與網站是同一部署單位，不可各自獨立上線。
 ## 5b. RPC 工作階段撤銷（可獨立發布）
 
 在 keyed creates 之後套用 `supabase/migrations/20261128030334_rights_live_sessions.sql`：
-SHA-256 `14cec0d277e7327e619a4f40409d0b5cf0fbc64869be6362890c79c85435a347`。
+SHA-256 `842b6ae51fd38be2f09ba86f72a0559d4753e733cff71e8e6ac8183f95e3230a`。
 這是純資料庫 migration，可獨立於網站部署；RPC 簽章、回應格式與網站登出流程均不變。
-直接呼叫 RPC 時，缺少、已刪除或已過期的 session 視同未登入：需要身分的 RPC 回 PT401，
+直接呼叫 RPC 時，呼叫者須持有有效的 JWT `session_id`，與其在 `auth.sessions` 的列相符且
+`not_after` 未過（僅檢查此顯式欄位，不含 Supabase time-box／無活動逾時）；否則視同未登入：
+需要身分的 RPC 回 PT401，
 `rights_is_admin` 回 false，公開讀取維持可用且不回傳個人投票狀態。
 
 `@supabase/auth-js` 2.117.1 的 `getUser()` 呼叫 `GET /auth/v1/user`。GoTrue 的

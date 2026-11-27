@@ -16,7 +16,7 @@ RESET ROLE;
 
 -- Auth stays owned by Supabase. Return only the current caller's UUID when
 -- both claims match an active session. Never grant the executor Auth SELECT.
-CREATE FUNCTION rights_private.live_session_user() RETURNS uuid
+CREATE OR REPLACE FUNCTION rights_private.live_session_user() RETURNS uuid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
   WITH claims AS (
     SELECT NULLIF(pg_catalog.current_setting('request.jwt.claims',true),'')::jsonb AS jwt

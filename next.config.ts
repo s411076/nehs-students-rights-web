@@ -2,9 +2,6 @@
 
 const nextConfig: NextConfig = {
   /* config options here */
-  async rewrites() {
-    return [{ source: "ci-proof-build", destination: "/" }];
-  },
   async headers() {
     // Baseline browser defense-in-depth only (GAP-5): clickjacking, MIME
     // sniffing, referrer leakage, and framing/object embedding. Deliberately
@@ -30,3 +27,4 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+

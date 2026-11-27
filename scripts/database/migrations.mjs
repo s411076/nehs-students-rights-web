@@ -8,6 +8,7 @@ export const MIGRATION_FILES = [
   'supabase/migrations/20261017000000_proposal_status_collapse.sql',
   'supabase/migrations/20261022143718_rights_filtered_queues.sql',
   'supabase/migrations/20261127165027_keyed_creates.sql',
+  'supabase/migrations/20261128030334_rights_live_sessions.sql',
 ];
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');

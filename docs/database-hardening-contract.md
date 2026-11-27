@@ -22,6 +22,11 @@ mutation independently verifies confirmed school identity from auth.users; admin
 operations also verify protected admins membership. Definer RPCs have explicit
 execute grants, empty search_path and qualified object references.
 
+Any RPC that resolves a caller requires a valid JWT `session_id` that matches
+the caller's row in `auth.sessions` and has no elapsed `not_after`. Otherwise
+identity is absent: protected RPCs use PT401, `rights_is_admin` returns false,
+and public reads stay available with guest personalization.
+
 ## Read contract
 
 RPCs return JSON data, not the HTTP RightsResult envelope:

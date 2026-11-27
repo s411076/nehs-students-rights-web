@@ -36,7 +36,8 @@ node scripts/database/collapse-gate.mjs
 The first command creates a clean `template0` DB, loads the minimal Auth schema
 (including RLS), the checked-in **schema-only** public baseline and synthetic
 legacy fixtures, then applies the complete ordered chain from
-`scripts/database/migrations.mjs` (hardening → status collapse). The second clones the real restored
+`scripts/database/migrations.mjs` (hardening → status collapse → filtered queues →
+keyed creates → live sessions). The second clones the real restored
 schema/data, applies the identical chain, compares original legacy rows inside
 SQL without printing them, and tests with synthetic users and synthetic articles.
 Each run prints its disposable DB name; DBs are retained so the parent can inspect
@@ -118,7 +119,7 @@ Supabase CLI discovery used `npx --yes supabase --help`, `migration --help`, and
   in unexposed `rights_private`, with no application USAGE or EXECUTE grants.
   Anonymous callers can execute only public reads and caller-only `rights_is_admin`.
   Other functions require authenticated execution **and** database identity checks.
-- The one owner exception is `rights_private.user_identity(uuid)`: postgres-owned,
+- One owner exception is `rights_private.user_identity(uuid)`: postgres-owned,
   STABLE SECURITY DEFINER, empty search_path, static qualified UUID lookup, at most
   one row, returning only email, confirmation/ban/deletion/anonymous state and a
   200-codepoint display label. It returns no raw metadata or Auth composite.
@@ -128,7 +129,12 @@ Supabase CLI discovery used `npx --yes supabase --help`, `migration --help`, and
   `rights_executor`. Temporary creator SET/INHERIT membership and schema CREATE
   privileges used for construction are revoked before commit; at most PG17's
   automatic ADMIN-only creator membership remains. Reverse membership is forbidden.
-- Eligibility uses the exact recovered `auth.uid()` claim expression + current `auth.users` confirmed full
+- The second owner exception, `rights_private.live_session_user()`, uses the
+  same ownership, search path and grants. It returns only the JWT subject when
+  the `session_id` matches a live `auth.sessions` row owned by that user.
+  Invalid sessions behave as guests in public proposal projections and trigger
+  PT401 in RPCs that require identity.
+- Eligibility uses that live session + current `auth.users` confirmed full
   `nehs.hc.edu.tw` email, nondeleted/nonanonymous state and a ban that has not expired.
   Expired bans permit access. Caller email uses lower + ECMAScript-compatible trim
   followed by full-domain validation, matching the application. Admin checks compare only that verified email

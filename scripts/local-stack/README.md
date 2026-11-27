@@ -43,7 +43,8 @@ the generated password; local socket administration is task-container-local.
 State/schema artifacts are outside the repository with mode 0600. JWT signing
 material is random per startup and used only here; no service-role token exists.
 State contains **fake local** signed tokens for anon, studentA/B, admin, outsider,
-and unconfirmed. JWTs expire after 24 hours; restart the fixture after expiry.
+and unconfirmed. Each user JWT's `session_id` matches a synthetic `auth.sessions`
+row. JWTs expire after 24 hours; restart the fixture after expiry.
 
 ## Application / parent browser QA endpoint
 
@@ -129,7 +130,7 @@ labeled synthetic container, never the recovery container or SQL agent DB.
 ```sh
 shasum -a 256 supabase/migrations/*.sql
 # Supply one reviewed hash per manifest entry, in manifest order.
-node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2 SHA256_3 SHA256_4
+node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2 SHA256_3 SHA256_4 SHA256_5
 node tests/real/boundary.http.mjs "$STATE"
 ```
 

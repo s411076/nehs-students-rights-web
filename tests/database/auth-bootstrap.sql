@@ -7,6 +7,13 @@ CREATE TABLE auth.users (
 ALTER TABLE auth.users ENABLE ROW LEVEL SECURITY;
 GRANT SELECT ON auth.users TO postgres WITH GRANT OPTION;
 GRANT REFERENCES ON auth.users TO postgres;
+CREATE TABLE auth.sessions (
+  id uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  not_after timestamptz
+);
+ALTER TABLE auth.sessions ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON auth.sessions TO postgres WITH GRANT OPTION;
 GRANT USAGE ON SCHEMA auth TO anon,authenticated;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.sub',true),''),

@@ -18,12 +18,14 @@ export function sign(secret, claims) {
   return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
 }
 
+export const sessionId = (user) => `30000000${user.id.slice(8)}`;
+
 export function credentials(secret) {
   const iat = Math.floor(Date.now() / 1000);
   const common = { iss: 'synthetic-local-only', aud: 'authenticated', iat, exp: iat + 86400 };
   return Object.fromEntries([
     ['anon', sign(secret, { ...common, role: 'anon' })],
     ...Object.entries(users).map(([name, user]) => [name,
-      sign(secret, { ...common, sub: user.id, role: 'authenticated', email: user.email })]),
+      sign(secret, { ...common, sub: user.id, session_id: sessionId(user), role: 'authenticated', email: user.email })]),
   ]);
 }

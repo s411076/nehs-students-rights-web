@@ -20,8 +20,7 @@ export type Row = Record<string, unknown>;
 export function createFixtureData() {
   const tables: Record<string, Row[]> = {};
   const counters = { insert: 0, update: 0, delete: 0, total: 0 };
-  const requests: { method: string; path: string; token: string }[] = [];
-  const rpcCounters = { read: 0, mutation: 0 };
+  const requests: { method: string; path: string }[] = [];
   const legacyVotes = new Map<string, number>();
   const votes = new Map<string, Set<string>>();
   const authors = new Map<string, User>();
@@ -29,7 +28,6 @@ export function createFixtureData() {
   function reset() {
     Object.assign(counters, { insert: 0, update: 0, delete: 0, total: 0 });
     requests.length = 0;
-    Object.assign(rpcCounters, { read: 0, mutation: 0 });
     legacyVotes.clear(); votes.clear(); authors.clear();
     createReceipts.clear();
     for (const key of Object.keys(tables)) delete tables[key];
@@ -48,6 +46,6 @@ export function createFixtureData() {
     for (const row of tables.proposals) legacyVotes.set(String(row.id), Number(row.upvotes_count));
   }
   reset();
-  return { tables, counters, requests, rpcCounters, legacyVotes, votes, authors, createReceipts, reset };
+  return { tables, counters, requests, legacyVotes, votes, authors, createReceipts, reset };
 }
 export type FixtureData = ReturnType<typeof createFixtureData>;

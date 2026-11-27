@@ -58,11 +58,8 @@ export async function startSupabaseFixture(port = 0) {
       if (body.clear === true) failure = null;
       return send(200, {});
     }
-    data.requests.push({ method, path: url.pathname + url.search, token });
+    data.requests.push({ method, path: url.pathname + url.search });
     if (request.headers.apikey !== fakePublishableKey) return send(401, { message: 'Invalid fixture key' });
-    if (url.pathname.startsWith('/rest/v1/rpc/rights_') && method === 'POST') {
-      data.rpcCounters[mutationRpcs.has(url.pathname.slice('/rest/v1/rpc/'.length)) ? 'mutation' : 'read']++;
-    }
     if (failure?.path === url.pathname && failure.method === method) return send(400, { message: 'Injected provider failure' });
     const verified = tokens.get(token);
     if (url.pathname === '/auth/v1/logout') return send(200, {});
@@ -145,7 +142,18 @@ function validateArguments(name: string, body: Row) {
       keys.some(key => !(key in body) && !optional.includes(key))) {
     throw new FixtureRpcError(400, 'Unknown RPC signature');
   }
-  for (const key of ['p_id', 'p_proposal_id', 'p_client_key']) {
-    if (key in body) body[key] = uuid(body[key]);
+  for (const [key, value] of Object.entries(body)) {
+    switch (key) {
+      case 'p_id': case 'p_proposal_id': case 'p_client_key': body[key] = uuid(value); break;
+      case 'p_limit': case 'p_expected_version':
+        if (!Number.isSafeInteger(value)) throw new FixtureRpcError(400, 'Invalid integer');
+        break;
+      case 'p_is_anonymous': case 'p_voted':
+        if (typeof value !== 'boolean') throw new FixtureRpcError(400, 'Invalid boolean');
+        break;
+      case 'p_cursor': break; // The page parser checks the nested JSON object.
+      default:
+        if (typeof value !== 'string') throw new FixtureRpcError(400, 'Invalid text');
+    }
   }
 }

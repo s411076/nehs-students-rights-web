@@ -133,6 +133,14 @@ test('caps streamed bytes despite lying Content-Length', async () => {
   expect((await POST(new NextRequest(seeded.url, { method: 'POST', headers: seeded.headers, body }))).status).toBe(413);
   expect(fixture.data.counters.total).toBe(0);
 });
+test('accepts valid JSON exactly at the byte cap', async () => {
+  const seeded = await actionRequest(studentCases[0]);
+  const json = JSON.stringify(studentCases[0]);
+  const body = json + ' '.repeat(65536 - Buffer.byteLength(json));
+  const response = await POST(new NextRequest(seeded.url, { method: 'POST', headers: seeded.headers, body }));
+  expect(response.status).toBe(200);
+  expect(fixture.data.counters.insert).toBe(1);
+});
 test.each(['absent', 'forged'] as const)('denies %s identity before mutation RPC', async mode => {
   const request = await actionRequest(adminCases[0]);
   if (mode === 'absent') request.headers.delete('cookie');

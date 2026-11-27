@@ -7,6 +7,7 @@ Paths below are relative to `tests/`. PostgreSQL assertions run against the migr
 - A2 Only a confirmed full school email and a positive caller-only admin lookup confer admin access; membership lookup failure fails closed. — `integration/server-auth.test.ts`, `database/regression.sql`
 - A3 Students may create a proposal, feedback or comment and set their own vote; only admins may approve, reject, edit or delete proposals, delete comments, save replies, delete feedback and create/delete home sections. — `integration/rights-actions.test.ts`
 - A4 Public list/get RPCs and caller-only role checks allow guest reads; pending/admin lists, author attribution and admin mutations require an eligible admin; raw tables and private functions are inaccessible to API roles. — `database/regression.sql`, `database/queues.sql`
+- A5 Pending-list, pending-queue and author routes reject ineligible callers before requesting private data. A successful guarded read forwards refreshed cookies and is not cacheable. — `integration/rights-reads.test.ts`
 
 ## Write endpoint and receipts
 - W1 POST requires a matching Origin, the application request header, JSON media type and valid JSON; even streamed bodies cannot exceed 65,536 bytes. — `integration/rights-actions.test.ts`
@@ -26,6 +27,8 @@ Paths below are relative to `tests/`. PostgreSQL assertions run against the migr
 - C2 Lost vote receipts reconcile by reading public state without replay; server votes and counts take precedence over localStorage. — `e2e/security-flows.spec.ts`
 - C3 Feedback moderation is inline: saving and clearing an official reply moves the item between tabs and updates counts; stale versions cannot overwrite another moderator. — `e2e/security-flows.spec.ts`, `database/regression.sql`
 - C4 Profile does not query proposals for unverifiable ownership. — `e2e/security-flows.spec.ts`
+- C5 Editing an uncertain proposal draft starts a new submission even when the previous request committed. — `e2e/security-flows.spec.ts`
+- C6 An admin can approve a pending proposal inline and see it in the public list; approval cannot silently perform rejection. — `e2e/security-flows.spec.ts`
 - H1 Live page and API responses disallow framing and MIME sniffing, constrain referrers and enforce CSP; verified session responses are not cacheable. — `e2e/security-headers.spec.ts`
 
 ## Known gaps

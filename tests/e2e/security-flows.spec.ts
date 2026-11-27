@@ -123,3 +123,30 @@ test('student resends a pending proposal after its receipt is lost', async ({ pa
   expect(snapshot.rows('proposals').filter(row => row.content === 'Only one pending proposal')).toHaveLength(1);
   expect(snapshot.requests.filter(entry => entry.path.endsWith('/rights_create_proposal'))).toHaveLength(2);
 });
+
+test('editing an uncertain proposal draft starts a distinct submission', async ({ page, context, request }) => {
+  await login(context, 'student');
+  await page.goto('/proposals');
+  const title = page.getByLabel('提案標題');
+  const send = page.getByRole('button', { name: '送出提案' });
+  await title.fill('First draft');
+  await page.getByLabel('寶貴意見內容').fill('Edited after disconnect');
+  await page.route('**/api/rights/actions', async route => {
+    expect((await route.fetch()).status()).toBe(200);
+    await route.abort('failed');
+  }, { times: 1 });
+  await send.click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('可以再次送出未修改的草稿');
+  await title.fill('Revised draft');
+  await send.click();
+  await expect(title).toHaveValue('');
+  const rows = (await state(request)).rows('proposals').filter(row => row.content === 'Edited after disconnect');
+  expect(rows.map(row => row.title)).toEqual(['[環境與設備] First draft', '[環境與設備] Revised draft']);
+});
+
+test('inline approval publishes the reviewed proposal', async ({ page, context }) => {
+  await login(context, 'admin');
+  await page.goto('/proposals');
+  await page.getByRole('button', { name: '核准上架' }).click();
+  await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'Fixture 待審核' })).toBeVisible();
+});

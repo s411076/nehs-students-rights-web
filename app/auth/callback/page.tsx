@@ -1,5 +1,6 @@
 ﻿'use client'
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import {
@@ -55,9 +56,9 @@ export default function AuthCallbackPage() {
         <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-neutral-400">
           此帳號不是已確認的學校帳號（限 @nehs.hc.edu.tw）。公開內容仍可瀏覽，請使用學校帳號重新登入。
         </p>
-        <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
+        <Link href="/" prefetch={false} className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
           回首頁
-        </a>
+        </Link>
       </main>
     )
   }
@@ -69,9 +70,9 @@ export default function AuthCallbackPage() {
         <p role="alert" className="max-w-prose text-sm text-gray-500 dark:text-neutral-400">
           登入未完成或連結已失效（例如重複使用的登入連結），請回首頁重新登入。
         </p>
-        <a href="/" className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
+        <Link href="/" prefetch={false} className="text-sm font-bold text-blue-600 dark:text-blue-400 underline">
           回首頁重新登入
-        </a>
+        </Link>
       </main>
     )
   }

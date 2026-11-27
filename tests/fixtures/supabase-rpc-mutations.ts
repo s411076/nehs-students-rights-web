@@ -30,6 +30,18 @@ export function mutateRpc(data: FixtureData, name: string, context: { readonly b
     return { id, voted, upvotes_count: baseline + ballots.size };
   }
   if (['rights_create_proposal', 'rights_create_feedback', 'rights_add_comment', 'rights_create_home_section'].includes(name)) {
+    if (typeof body.p_client_key !== 'string' || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(body.p_client_key)) {
+      throw new FixtureRpcError(400, 'Invalid client key');
+    }
+    const receiptKey = `${actor.id}:${name}:${body.p_client_key.toLowerCase()}`;
+    const fields = Object.keys(body).filter(field => field !== 'p_client_key').sort();
+    const args = JSON.stringify(body, fields);
+    const existing = data.createReceipts.get(receiptKey);
+    if (existing) {
+      if (existing.args !== args) throw new FixtureRpcError(409, 'Client key conflict');
+      return existing.receipt;
+    }
+
     const id = `insert-${data.counters.total + 1}`;
     const row: Row = { id, version: 1, created_at: '2026-01-02T00:00:00.000001Z' };
     let table: string;
@@ -55,18 +67,6 @@ export function mutateRpc(data: FixtureData, name: string, context: { readonly b
         default: throw new FixtureRpcError(400, 'Unknown create RPC');
       }
     }
-    if (typeof body.p_client_key !== 'string' || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(body.p_client_key)) {
-      throw new FixtureRpcError(400, 'Invalid client key');
-    }
-    const clientKey = body.p_client_key.toLowerCase();
-    const fields = Object.keys(body).filter(field => field !== 'p_client_key').sort();
-    const original = JSON.stringify(body, fields);
-    const existing = data.tables[table].find(item => item.user_id === actor.id && item.client_key === clientKey);
-    if (existing) {
-      if (existing.create_args !== original) throw new FixtureRpcError(409, 'Client key conflict');
-      return { inserted: true, id: existing.id, version: 1 };
-    }
-    Object.assign(row, { user_id: actor.id, client_key: clientKey, create_args: original });
     if (table === 'proposals') data.legacyVotes.set(id, 0);
     if (table !== 'home_sections') {
       const displayName = actor.user_metadata.full_name || actor.user_metadata.name || '學生';
@@ -76,7 +76,9 @@ export function mutateRpc(data: FixtureData, name: string, context: { readonly b
     }
     data.tables[table].push(row);
     recordWrite(data, 'insert');
-    return { inserted: true, id, version: 1 };
+    const receipt = { inserted: true, id, version: 1 } as const;
+    data.createReceipts.set(receiptKey, { args, receipt });
+    return receipt;
   }
   let table: string;
   switch (name) {

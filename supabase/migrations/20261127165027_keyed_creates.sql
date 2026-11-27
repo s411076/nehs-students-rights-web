@@ -13,22 +13,25 @@ BEGIN
   END IF;
 END $$;
 
-ALTER TABLE public.home_sections ADD COLUMN user_id uuid;
-ALTER TABLE public.proposals ADD COLUMN client_key uuid, ADD COLUMN create_digest bytea;
-CREATE UNIQUE INDEX proposals_caller_key ON public.proposals(user_id,client_key) WHERE client_key IS NOT NULL;
-ALTER TABLE public.feedback ADD COLUMN client_key uuid, ADD COLUMN create_digest bytea;
-CREATE UNIQUE INDEX feedback_caller_key ON public.feedback(user_id,client_key) WHERE client_key IS NOT NULL;
-ALTER TABLE public.home_sections ADD COLUMN client_key uuid, ADD COLUMN create_digest bytea;
-CREATE UNIQUE INDEX home_sections_caller_key ON public.home_sections(user_id,client_key) WHERE client_key IS NOT NULL;
-ALTER TABLE public.proposal_comments ADD COLUMN client_key uuid, ADD COLUMN create_digest bytea;
-CREATE UNIQUE INDEX proposal_comments_caller_key ON public.proposal_comments(user_id,client_key) WHERE client_key IS NOT NULL;
-
 GRANT CREATE ON SCHEMA public TO rights_executor;
 SET ROLE rights_executor;
+-- Receipts outlive moderation deletes, including cascaded comment deletes.
+-- See lib/rights/user-resends-keyed-creates.adr.md.
+CREATE TABLE rights_private.create_receipts (
+  caller_id uuid NOT NULL,
+  action text NOT NULL,
+  client_key uuid NOT NULL,
+  create_digest bytea NOT NULL,
+  receipt jsonb,
+  PRIMARY KEY (caller_id,action,client_key)
+);
+ALTER TABLE rights_private.create_receipts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE rights_private.create_receipts FROM PUBLIC,anon,authenticated;
+
 CREATE OR REPLACE FUNCTION rights_private.mutate(p_action text,p_args jsonb) RETURNS jsonb
 LANGUAGE plpgsql SET search_path='' AS $$
 DECLARE u uuid; name text; title text; body text; category text; v_reply text; ident uuid; pid uuid; v bigint;
-  k uuid; digest bytea; stored_digest bytea;
+  k uuid; digest bytea; stored_digest bytea; create_receipt jsonb;
   t text; row_before jsonb; result_row jsonb; voted boolean; previously_voted boolean; baseline bigint;
 BEGIN
   IF p_action IS NULL OR p_args IS NULL OR EXISTS (SELECT 1 FROM pg_catalog.jsonb_each(p_args) WHERE value='null'::jsonb) THEN
@@ -41,6 +44,16 @@ BEGIN
     IF k IS NULL THEN RAISE SQLSTATE 'PT400' USING MESSAGE='Missing client key'; END IF;
     -- Compare original arguments: title formatting and feedback fallbacks can be lossy.
     digest:=pg_catalog.sha256(pg_catalog.convert_to((p_args-'client_key')::text,'UTF8'));
+    -- The unique key makes concurrent resends wait for the first transaction.
+    -- A failed create rolls back the reservation; a successful one fills its receipt before commit.
+    INSERT INTO rights_private.create_receipts(caller_id,action,client_key,create_digest)
+      VALUES(u,p_action,k,digest) ON CONFLICT (caller_id,action,client_key) DO NOTHING;
+    IF NOT FOUND THEN
+      SELECT create_digest,receipt INTO stored_digest,create_receipt
+        FROM rights_private.create_receipts WHERE caller_id=u AND action=p_action AND client_key=k;
+      IF stored_digest IS DISTINCT FROM digest THEN RAISE SQLSTATE 'PT409' USING MESSAGE='Client key conflict'; END IF;
+      RETURN create_receipt;
+    END IF;
     body:=rights_private.text_value(p_args->>'content',CASE WHEN p_action='add_comment' THEN 1000 ELSE 5000 END);
     IF p_action<>'add_comment' THEN title:=rights_private.text_value(p_args->>'title',100,p_action='create_feedback'); END IF;
     IF p_action IN ('create_proposal','create_feedback') THEN
@@ -50,23 +63,17 @@ BEGIN
     IF p_action='create_proposal' THEN
       IF pg_catalog.left(title,1)<>'[' THEN title:='['||category||'] '||title; END IF;
       title:=rights_private.text_value(title,120);
-      t:='proposals';
-      INSERT INTO public.proposals(client_key,create_digest,title,content,user_id,author_name,is_anonymous,status,attribution_trusted)
-        VALUES(k,digest,title,body,u,name,false,'待審核',true)
-        ON CONFLICT (user_id,client_key) WHERE client_key IS NOT NULL DO NOTHING
+      INSERT INTO public.proposals(title,content,user_id,author_name,is_anonymous,status,attribution_trusted)
+        VALUES(title,body,u,name,false,'待審核',true)
         RETURNING id,content_version INTO ident,v;
     ELSIF p_action='create_feedback' THEN
       IF pg_catalog.jsonb_typeof(p_args->'is_anonymous') IS DISTINCT FROM 'boolean' THEN RAISE SQLSTATE 'PT400' USING MESSAGE='Invalid boolean'; END IF;
       IF title='' THEN title:=pg_catalog.left(body,15)||CASE WHEN pg_catalog.char_length(body)>15 THEN '...' ELSE '' END; END IF;
-      t:='feedback';
-      INSERT INTO public.feedback(client_key,create_digest,title,content,category,user_id,author_name,is_anonymous,attribution_trusted)
-        VALUES(k,digest,title,body,category,u,name,(p_args->>'is_anonymous')::boolean,true)
-        ON CONFLICT (user_id,client_key) WHERE client_key IS NOT NULL DO NOTHING
+      INSERT INTO public.feedback(title,content,category,user_id,author_name,is_anonymous,attribution_trusted)
+        VALUES(title,body,category,u,name,(p_args->>'is_anonymous')::boolean,true)
         RETURNING id,content_version INTO ident,v;
     ELSIF p_action='create_home_section' THEN
-      t:='home_sections';
-      INSERT INTO public.home_sections(client_key,create_digest,user_id,title,content) VALUES(k,digest,u,title,body)
-        ON CONFLICT (user_id,client_key) WHERE client_key IS NOT NULL DO NOTHING
+      INSERT INTO public.home_sections(title,content) VALUES(title,body)
         RETURNING id,content_version INTO ident,v;
     ELSE
       IF pg_catalog.jsonb_typeof(p_args->'is_anonymous') IS DISTINCT FROM 'boolean' THEN RAISE SQLSTATE 'PT400' USING MESSAGE='Invalid boolean'; END IF;
@@ -74,19 +81,13 @@ BEGIN
       -- Serialize against deletion/moderation, without changing proposal version.
       PERFORM 1 FROM public.proposals WHERE id=pid AND status IN ('處理中','已結案') FOR UPDATE;
       IF NOT FOUND THEN RAISE SQLSTATE 'PT409' USING MESSAGE='Proposal unavailable'; END IF;
-      t:='proposal_comments';
-      INSERT INTO public.proposal_comments(client_key,create_digest,proposal_id,content,user_id,author_name,is_anonymous,attribution_trusted)
-        VALUES(k,digest,pid,body,u,name,(p_args->>'is_anonymous')::boolean,true)
-        ON CONFLICT (user_id,client_key) WHERE client_key IS NOT NULL DO NOTHING
+      INSERT INTO public.proposal_comments(proposal_id,content,user_id,author_name,is_anonymous,attribution_trusted)
+        VALUES(pid,body,u,name,(p_args->>'is_anonymous')::boolean,true)
         RETURNING id,content_version INTO ident,v;
     END IF;
-    IF ident IS NULL THEN
-      EXECUTE pg_catalog.format('SELECT id,create_digest FROM public.%I WHERE user_id=$1 AND client_key=$2',t)
-        INTO ident,stored_digest USING u,k;
-      IF stored_digest IS DISTINCT FROM digest THEN RAISE SQLSTATE 'PT409' USING MESSAGE='Client key conflict'; END IF;
-      v:=1; -- Replay the creation receipt, even if moderation advanced the current version.
-    END IF;
-    RETURN pg_catalog.jsonb_build_object('inserted',true,'id',ident,'version',v);
+    create_receipt:=pg_catalog.jsonb_build_object('inserted',true,'id',ident,'version',v);
+    UPDATE rights_private.create_receipts SET receipt=create_receipt WHERE caller_id=u AND action=p_action AND client_key=k;
+    RETURN create_receipt;
   END IF;
   IF p_action='set_vote' THEN
     IF pg_catalog.jsonb_typeof(p_args->'voted') IS DISTINCT FROM 'boolean' THEN RAISE SQLSTATE 'PT400' USING MESSAGE='Invalid boolean'; END IF;

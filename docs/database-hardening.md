@@ -68,6 +68,8 @@ node tests/real/boundary.http.mjs "$STATE"
 3. 套用 matching release：migration、API schema reload、相容網站同版 promotion，協調執行。
 4. 跑 smoke，確認後才重開寫入。
 
+四個新增操作的 keyed RPC 與相容網站必須同版部署。migration 會移除舊 RPC 簽章，新舊版本混用時，新增提案、建言、留言與首頁區塊都會失敗。
+
 還原限制要先記住：raw-table 撤權後不能只回滾 app，因為舊網站的 raw-table 路徑已被撤權。任何情況都不做 DISABLE RLS，也不做 broad grant。
 
 ## 5a. 狀態收斂（status collapse）協調發布（只描述，不執行、不部署正式）
@@ -77,8 +79,8 @@ node tests/real/boundary.http.mjs "$STATE"
 migration 與網站是同一部署單位，不可各自獨立上線。
 
 - 執行鏈：`scripts/database/migrations.mjs` 鎖定完整有序鏈（hardening → collapse → filtered queues → keyed creates），
-  `regression.mjs`、`managed-principal.mjs` 與 `stack.mjs apply` 都跑整鏈並逐檔 SHA-256 驗證，
-  不允許單檔子集套用。`stack.mjs apply` 用法為 `apply STATE SHA1 SHA2...`（每檔一個已完成雜湊）。
+  `regression.mjs`、`managed-principal.mjs` 與 `stack.mjs apply` 都依序套用整鏈。前兩者計算並記錄 SHA-256；
+  只有 `stack.mjs apply` 逐檔比對呼叫者提供的 SHA-256，拒絕單檔子集套用。用法為 `apply STATE SHA1 SHA2...`（每檔一個已完成雜湊）。
   這是全新測試資料庫的規則；正式環境依 migration history 只套尚未執行的版本，不重跑第 7 節已完成的 hardening。
 - Managed principal：沿用 hardening 的最小暫時 `GRANT rights_executor TO current_user WITH SET, INHERIT`
   並於提交前 `REVOKE ... GRANTED BY current_user` 清理；`rights_private` 函式以 `SET ROLE rights_executor`

@@ -50,6 +50,7 @@ BEGIN
   PERFORM rights_test.assert(NOT has_schema_privilege('authenticated','rights_private','USAGE'),'private schema denied');
   FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
     PERFORM rights_test.assert(NOT has_schema_privilege(r,'rights_private','USAGE,CREATE'),'JWT private schema denied');
+    PERFORM rights_test.assert(NOT has_table_privilege(r,'rights_private.create_receipts','SELECT,INSERT,UPDATE,DELETE,TRUNCATE'),'JWT receipt ledger denied');
     PERFORM rights_test.assert(NOT has_function_privilege(r,'rights_private.user_identity(uuid)','EXECUTE'),'JWT helper denied');
     PERFORM rights_test.assert(NOT pg_has_role(r,'rights_executor','SET'),'JWT cannot assume executor');
   END LOOP;

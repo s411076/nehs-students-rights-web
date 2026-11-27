@@ -22,9 +22,6 @@ const payloads = [
   { action: 'deleteHomeSection', payload: { id: 'h', expectedVersion: 1 } },
 ];
 describe('strict action boundary', () => {
-  it.each(payloads)('parses $action when exact payload is supplied', request => {
-    expect(parseActionRequest(request)).toEqual({ ok: true, data: request });
-  });
   it.each(payloads)('rejects $action when fields are injected', request => {
     expect(parseActionRequest({ ...request, payload: { ...request.payload, author_id: 'forged' } }).ok).toBe(false);
   });

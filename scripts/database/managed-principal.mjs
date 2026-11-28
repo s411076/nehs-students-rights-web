@@ -44,7 +44,10 @@ const authCatalog = `SELECT jsonb_build_object(
   'defaults',(SELECT jsonb_agg(to_jsonb(a) ORDER BY a.oid) FROM pg_default_acl a WHERE defaclnamespace='auth'::regnamespace));`;
 const counts = `DO $$ DECLARE r record; n bigint; BEGIN
   CREATE TEMP TABLE rights_old_counts(name text,n bigint);
-  FOR r IN SELECT c.oid,c.oid::regclass::text AS name FROM pg_class c WHERE c.relnamespace IN ('auth'::regnamespace,'public'::regnamespace) AND c.relkind='r' ORDER BY c.oid LOOP
+  FOR r IN SELECT c.oid,c.oid::regclass::text AS name FROM pg_class c
+    WHERE c.relkind='r' AND (c.relnamespace='auth'::regnamespace OR (
+      c.relnamespace='public'::regnamespace AND c.relname NOT IN ('feedbacks','endorsements','votes','profiles')
+    )) ORDER BY c.oid LOOP
     EXECUTE format('SELECT count(*) FROM %s',r.oid::regclass) INTO n;
     INSERT INTO rights_old_counts VALUES(r.name,n);
   END LOOP;
@@ -127,7 +130,7 @@ try {
   const authAfter = hash(sql(container, database, authCatalog));
   const countsAfter = hash(sql(container, database, counts));
   const principalAfter = hash(sql(container, database, principal));
-  if (authBefore !== authAfter || countsBefore !== countsAfter || principalBefore !== principalAfter) throw new Error('Auth catalog, legacy counts or principal attributes changed');
+  if (authBefore !== authAfter || countsBefore !== countsAfter || principalBefore !== principalAfter) throw new Error('Auth catalog, retained row counts or principal attributes changed');
   sql(container, database, file('tests/database/managed-principal.sql'), undefined, 'post-migration effective privileges');
   sql(container, database, `\\set VERBOSITY verbose\nBEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`, undefined, 'full SQL regression');
   sql(container, database, file('tests/database/queues.sql'), undefined, 'filtered queue totals and gating');
@@ -136,9 +139,9 @@ try {
   writeFileSync(resolve(root, 'tests/database/verification-managed.json'), `${JSON.stringify({
     command: 'node scripts/database/managed-principal.mjs', container, database, image,
     migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })), prerequisites: baseline,
-    authCatalogSha256: { before: authBefore, after: authAfter }, legacyCountsSha256: { before: countsBefore, after: countsAfter },
+    authCatalogSha256: { before: authBefore, after: authAfter }, retainedCountsSha256: { before: countsBefore, after: countsAfter },
     principalSha256: { before: principalBefore, after: principalAfter, sourceBefore: sourcePrincipalBefore, sourceAfter: sourcePrincipalAfter },
-    passed: ['fresh-cluster-no-executor', 'postgres-nosuperuser-ddl-guard', 'auth-policy-42501', 'managed-migration', 'auth-catalog-unchanged', 'legacy-counts-preserved', 'effective-privilege-cleanup', 'full-sql-regression'],
+    passed: ['fresh-cluster-no-executor', 'postgres-nosuperuser-ddl-guard', 'auth-policy-42501', 'managed-migration', 'auth-catalog-unchanged', 'legacy-objects-absent', 'retained-counts-preserved', 'effective-privilege-cleanup', 'full-sql-regression'],
     completedAt: new Date().toISOString(), productionConnection: false, recoveredRowsOutput: false,
   }, null, 2)}\n`);
   console.log('PASS: fresh non-superuser postgres migration, Auth catalog/count preservation, effective privileges and full SQL regressions');

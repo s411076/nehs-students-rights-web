@@ -11,6 +11,7 @@ Paths below are relative to `tests/`. PostgreSQL assertions run against the migr
 - A6 A guarded read and proxy return all refreshed session cookie chunks; the proxy also forwards the refreshed cookies to the downstream request. — `integration/rights-reads.test.ts`
 - A7 A live Supabase session allows eligible RPC actors to write. Deleting the session causes student writes and admin actions to return PT401, and caller-only admin lookup returns false. — `database/regression.sql`
 - A8 Missing, malformed, expired or other-user session IDs return PT401 for authenticated writes. Public proposal reads remain available to guests and show guest vote state for revoked sessions. — `database/regression.sql`
+- A9 The migration chain removes the retired public tables, functions (including overloads), and columns while preserving retained rows with the documented cutover transformations. — `database/preservation-check.sql`
 
 ## Write endpoint and receipts
 - W1 POST requires a matching Origin, the application request header, JSON media type and valid JSON; streamed bytes are capped cumulatively at 65,536 even when Content-Length is understated. — `integration/rights-actions.test.ts`

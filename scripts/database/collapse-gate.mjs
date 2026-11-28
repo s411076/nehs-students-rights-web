@@ -2,20 +2,12 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadMigrationChain } from './migrations.mjs';
+import { POSTGRES_IMAGE, loadMigrationChain } from './migrations.mjs';
 import { checkConcurrency } from './concurrency.mjs';
 
-// Portable synthetic gate: task-owned supabase/postgres container, no recovery
-// container, no backups, no production. The stock postgres:17 image cannot
-// downgrade its bootstrap superuser, so this gate uses the cached Supabase
-// image with initdb -U supabase_admin (same as managed-principal.mjs): the
-// managed `postgres` role is then a plain NOSUPERUSER CREATEDB CREATEROLE
-// BYPASSRLS login. Legacy baseline comes from checked-in fixtures only;
-// public objects are transferred to postgres to mirror recovery ownership
-// (auth stays non-postgres with USAGE + SELECT/REFERENCES for postgres).
+// Bootstrap as supabase_admin so the migration login is non-superuser postgres.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const container = `rights-collapse-${Date.now()}-${process.pid}`;
-const image = 'supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00';
 const database = 'rights_test_collapse';
 const file = (path) => readFileSync(resolve(root, path), 'utf8');
 const chain = loadMigrationChain(root, (absolute) => readFileSync(absolute, 'utf8'));
@@ -35,6 +27,12 @@ function docker(args, input, stage = 'docker') {
 function sql(db, input, user = 'supabase_admin', stage = 'SQL') {
   return docker(['exec', '-i', '-u', '0', container, 'psql', '-X', '-qAt', '-h', '/tmp', '-U', user, '-d', db, '-v', 'ON_ERROR_STOP=1', '-f', '-'], `\\set VERBOSITY sqlstate\n${input}`, stage);
 }
+function schemaDump(db, schemas) {
+  return docker(['exec', '-u', '0', container, 'pg_dump', '-h', '/tmp',
+    '-U', 'supabase_admin', '-d', db, '--schema-only',
+    ...schemas.map((schema) => `--schema=${schema}`)], undefined, 'schema-only dump')
+    .replace(/^\\(?:un)?restrict [^\n]+(?:\n|$)/gmu, '');
+}
 function isolated() {
   if (!/^"none" (null|\{\})\s*$/u.test(docker(['inspect', '--format', '{{json .HostConfig.NetworkMode}} {{json .HostConfig.PortBindings}}', container]))) {
     throw new Error('Network-none container without published ports required');
@@ -46,7 +44,7 @@ try {
   docker(['run', '-d', '--pull=never', '--name', container, '--network', 'none', '--restart', 'no', '--user', 'postgres',
     '--tmpfs', '/tmp:rw,mode=1777', '--tmpfs', '/var/lib/postgresql/data:rw,uid=100,gid=101,mode=700',
     '--label', 'rights.synthetic=true',
-    '--entrypoint', 'sh', image, '-c',
+    '--entrypoint', 'sh', POSTGRES_IMAGE, '-c',
     "initdb -D /var/lib/postgresql/data/managed -U supabase_admin --auth-local=trust --auth-host=reject --locale-provider=icu --icu-locale=en-US --locale=en_US.UTF-8 >/tmp/init.log 2>&1 && exec postgres -D /var/lib/postgresql/data/managed -k /tmp -c listen_addresses='' -c shared_preload_libraries='' -c max_worker_processes=0 -c max_parallel_workers=0 -c max_logical_replication_workers=0 -c autovacuum=off -c logging_collector=off"], undefined, 'fresh cluster');
   created = true;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -57,28 +55,11 @@ try {
   }
   isolated();
   // Mirror the managed role limits. See create-policies-on-managed-auth-users.adr.md.
-  sql('postgres', `CREATE ROLE postgres LOGIN NOSUPERUSER CREATEDB CREATEROLE BYPASSRLS;
-    CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
-    CREATE ROLE service_role NOLOGIN; CREATE ROLE supabase_auth_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  sql('postgres', `${file('tests/database/managed-roles.sql')}
     CREATE DATABASE ${database} OWNER postgres TEMPLATE template0;`, 'supabase_admin', 'roles');
   sql(database, file('tests/database/auth-bootstrap.sql'), 'supabase_admin', 'auth bootstrap');
-  // Bootstrap grants USAGE only to anon/authenticated; the managed postgres
-  // reader needs explicit USAGE (SELECT/REFERENCES come from the bootstrap).
-  sql(database, `GRANT USAGE ON SCHEMA auth TO postgres;`, 'supabase_admin', 'auth usage');
   sql(database, file('tests/database/legacy-public-schema.sql'), 'supabase_admin', 'legacy schema');
   sql(database, file('tests/database/legacy-seed.sql'), 'supabase_admin', 'legacy seed');
-  // Mirror recovery ownership: public objects belong to postgres; auth stays
-  // with the superuser so postgres remains a granted reader, not the owner.
-  sql(database, `DO $$ DECLARE r record; BEGIN
-    FOR r IN SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f') LOOP
-      EXECUTE format('ALTER TABLE %s OWNER TO postgres', r.oid::regclass);
-    END LOOP;
-    FOR r IN SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-      WHERE n.nspname='public' LOOP
-      EXECUTE format('ALTER FUNCTION %s OWNER TO postgres', r.oid::regprocedure);
-    END LOOP;
-  END $$;`, 'supabase_admin', 'ownership transfer');
   const prerequisites = sql(database, `SELECT jsonb_build_object(
     'principal',current_user,'superuser',(SELECT rolsuper FROM pg_roles WHERE rolname=current_user),
     'createrole',(SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user),
@@ -96,6 +77,16 @@ try {
     || baseline.setAuthAdmin || baseline.setSupabaseAdmin || !baseline.executorAbsent) {
     throw new Error('Managed-principal prerequisites failed');
   }
+  const authBefore = schemaDump(database, ['auth']);
+  const principal = "SELECT to_jsonb(r) FROM pg_roles r WHERE rolname='postgres';";
+  const principalBefore = sql(database, principal);
+  sql(database, `DO $$ BEGIN
+    BEGIN
+      CREATE POLICY rights_negative_probe ON auth.users FOR SELECT TO postgres USING (true);
+      RAISE EXCEPTION 'Expected auth.users CREATE POLICY to fail with 42501';
+    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    END;
+  END $$;`, 'postgres', 'managed auth policy denial');
   sql(database, file('tests/database/preservation.sql'), 'postgres', 'preservation snapshot');
   // Guard itself needs a superuser (event triggers); it only *asserts* the
   // migration DDL below runs as the managed postgres principal.
@@ -114,6 +105,9 @@ try {
     sql(database, entry.sql, 'postgres', `managed migration ${entry.file}`);
   }
   sql(database, 'DROP EVENT TRIGGER rights_principal_guard; DROP SCHEMA rights_principal_guard CASCADE;', 'supabase_admin', 'guard cleanup');
+  if (schemaDump(database, ['auth']) !== authBefore || sql(database, principal) !== principalBefore) {
+    throw new Error('Managed migrations changed the Auth schema or postgres role attributes');
+  }
   // Preservation check reads executor-owned ballots; like the other runners
   // it executes as the superuser without printing rows.
   sql(database, `\\set VERBOSITY verbose\n${file('tests/database/preservation-check.sql')}`, 'supabase_admin', 'preservation check');
@@ -132,7 +126,7 @@ try {
   sql(database, file('tests/database/queues.sql'), 'supabase_admin', 'filtered queue totals and gating');
   await checkConcurrency(container, database, sql);
   writeFileSync(resolve(root, 'tests/database/verification-collapse.json'), `${JSON.stringify({
-    command: 'node scripts/database/collapse-gate.mjs', container, database, image,
+    command: 'node scripts/database/collapse-gate.mjs', container, database, image: POSTGRES_IMAGE,
     migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
     prerequisites: baseline, mappingCounts: counts,
     passed: ['managed-principal', 'whole-chain', 'legacy-objects-absent', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],

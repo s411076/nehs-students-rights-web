@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
+export const POSTGRES_IMAGE = 'supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00';
+
 // Exact ordered migration chain. Edit this single list when the parent adds
 // the next migration (e.g. pagination); all local gates read the same chain.
 export const MIGRATION_FILES = [

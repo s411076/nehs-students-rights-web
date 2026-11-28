@@ -17,9 +17,7 @@ function docker(args, input, stage = 'docker') {
   if (result.status !== 0) {
     const state = result.stderr?.match(/ERROR:\s+([A-Z0-9]{5})/u)?.[1] ?? 'LOCAL_PROCESS';
     const line = result.stderr?.match(/psql:<stdin>:(\d+):/u)?.[1] ?? 'unknown';
-    const assertion = stage === 'preservation check' || stage === 'full SQL regression'
-      ? result.stderr?.match(/ERROR:\s+P0001: (Regression assertion: [A-Za-z0-9 ,_-]+|Legacy objects remain: [A-Za-z0-9_.,() ]+|Retained row preservation failed)/u)?.[1]
-      : undefined;
+    const assertion = result.stderr?.match(/ERROR:\s+P0001: (Auth contract: [^\n]+|Regression assertion: [A-Za-z0-9 ,_-]+|Legacy objects remain: [A-Za-z0-9_.,() ]+|Retained row preservation failed)/u)?.[1];
     throw new Error(`${stage} failed (${state}, input line ${line}${assertion ? `, assertion: ${assertion}` : ''}); raw output withheld`);
   }
   return (result.stdout ?? '').trim();
@@ -58,6 +56,7 @@ try {
   sql('postgres', `${file('tests/database/managed-roles.sql')}
     CREATE DATABASE ${database} OWNER postgres TEMPLATE template0;`, 'supabase_admin', 'roles');
   sql(database, file('tests/database/auth-bootstrap.sql'), 'supabase_admin', 'auth bootstrap');
+  sql(database, `\\set VERBOSITY verbose\n${file('supabase/check-auth-contract.sql')}`, 'postgres', 'auth contract');
   sql(database, file('tests/database/legacy-public-schema.sql'), 'supabase_admin', 'legacy schema');
   sql(database, file('tests/database/legacy-seed.sql'), 'supabase_admin', 'legacy seed');
   const prerequisites = sql(database, `SELECT jsonb_build_object(
@@ -129,7 +128,7 @@ try {
     command: 'node scripts/database/collapse-gate.mjs', container, database, image: POSTGRES_IMAGE,
     migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
     prerequisites: baseline, mappingCounts: counts,
-    passed: ['managed-principal', 'whole-chain', 'legacy-objects-absent', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],
+    passed: ['managed-principal', 'auth-contract', 'whole-chain', 'legacy-objects-absent', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],
     completedAt: new Date().toISOString(), productionConnection: false, recoveredRowsOutput: false,
   }, null, 2)}\n`);
   console.log('PASS: portable NOSUPERUSER postgres whole-chain collapse gate with cleanup and full SQL regression');

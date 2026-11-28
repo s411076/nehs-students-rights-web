@@ -45,6 +45,7 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 ## Data
 
 - Before touching anything in the database (tables, migrations, RLS, functions), read the Supabase agent skills first.
+- Before applying any future production migration, run the read-only `supabase/check-auth-contract.sql` unchanged in the Supabase SQL Editor or with `psql -X -v ON_ERROR_STOP=1 -f supabase/check-auth-contract.sql`. Stop on any error.
 - Check production migration history and apply only missing versions; all six SQL migrations in `supabase/migrations/` were applied in production as of 2026-11-28.
 - Ship a migration that changes RPC signatures together with the matching site release; after raw-table privileges are revoked, rolling back only the app does not work.
 - Never `DISABLE RLS` or add broad grants to fix anything.

@@ -48,7 +48,7 @@ DELETE FROM public.admins WHERE email = '<account>@nehs.hc.edu.tw';
 | --- | --- |
 | `npm run dev` | 啟動開發伺服器，網址是 http://localhost:3000 |
 | `npm run check` | 依序跑型別檢查、lint、Vitest、離線正式 build、Playwright |
-| `npm run check:db` | 在全新的 Docker PostgreSQL 叢集中測試 migration 與空專案 baseline，並比對結構（先下載 image，指令見 `AGENTS.md`） |
+| `npm run check:db` | 在全新的 Docker PostgreSQL 叢集中測試 migration 與空專案 baseline，並比對結構（先下載 image，`docker pull` 指令見 `.github/workflows/ci.yml`） |
 | `npm run build` | 正式 build。在本機執行時要加上下方的離線變數 |
 | `npm run start` | 啟動正式伺服器 |
 | `npm run test` | Vitest 單元、元件與整合測試 |

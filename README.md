@@ -48,7 +48,7 @@ DELETE FROM public.admins WHERE email = '<account>@nehs.hc.edu.tw';
 | --- | --- |
 | `npm run dev` | Start the dev server at http://localhost:3000 |
 | `npm run check` | Typecheck, lint, Vitest, offline production build, then Playwright |
-| `npm run check:db` | Test the migration chain and empty-project baseline in fresh Docker PostgreSQL clusters and compare their catalogs (pull the image first; see `AGENTS.md`) |
+| `npm run check:db` | Test the migration chain and empty-project baseline in fresh Docker PostgreSQL clusters and compare their catalogs (pull the image first; the `docker pull` command is in `.github/workflows/ci.yml`) |
 | `npm run build` | Production build. Needs the offline variables below when run locally |
 | `npm run start` | Start the production server |
 | `npm run test` | Vitest unit, component and integration tests |

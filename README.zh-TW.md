@@ -19,13 +19,36 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<你的 publishable key>
 
 網站只會讀這兩個變數。不要使用 service-role key，也不要把任何真正的金鑰貼進 repo。
 
+## 在全新的 Supabase 專案重建
+
+1. 在 Supabase Dashboard 建立全新的空白 PostgreSQL 17 專案。用 `postgres` 身分在 SQL Editor 執行一次 [`supabase/baseline.sql`](./supabase/baseline.sql)，或連到新專案的 `postgres` 後執行 `psql -X -v ON_ERROR_STOP=1 -f supabase/baseline.sql`。這個檔案只有資料庫結構，只能用在全新的空白專案，絕對不要套用到正式環境。
+2. 在 SQL Editor 執行 [`supabase/check-auth-contract.sql`](./supabase/check-auth-contract.sql)，或用同一個 `psql` 指令換成這個檔案。若有錯誤，先停止設定。
+3. 在 SQL Editor 用 `postgres` 身分執行下方的 `INSERT`，加入第一批管理員。
+4. 在 **Authentication → Providers → Google** 啟用 Google，填入網頁版 OAuth 用戶端的 ID 和密鑰。在 Google Cloud 登記該頁顯示的回呼網址（一般專案為 `https://<project-ref>.supabase.co/auth/v1/callback`）。在 **Authentication → URL Configuration**，將 **Site URL** 設為 `https://<site-host>`，並在 **Redirect URLs** 新增 `https://<site-host>/auth/callback`。若要本機開發，再加入 `http://localhost:3000/auth/callback`。
+5. 依照上方「環境設定」填入新專案的網址及 publishable key。部署時，在建置前把 `NEXT_PUBLIC_SUPABASE_URL` 與 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 設到主機環境。
+
+日後升級時，baseline 標頭列出的版本及更早的 migration 都已包含在內。如果用 Supabase CLI 管理 migration 歷史，先將這些版本標記為已套用，之後只套用更新的 migration。
+
+### 新增或移除管理員
+
+在 SQL Editor 使用 `postgres` 身分。將下方的佔位文字換成對方已驗證的校內信箱（全小寫），只執行需要的那一段：
+
+```sql
+-- 新增（建立新專案時也用這一段）
+INSERT INTO public.admins (email) VALUES ('<account>@nehs.hc.edu.tw')
+ON CONFLICT (email) DO NOTHING;
+
+-- 移除
+DELETE FROM public.admins WHERE email = '<account>@nehs.hc.edu.tw';
+```
+
 ## 常用指令
 
 | 指令 | 用途 |
 | --- | --- |
 | `npm run dev` | 啟動開發伺服器，網址是 http://localhost:3000 |
 | `npm run check` | 依序跑型別檢查、lint、Vitest、離線正式 build、Playwright |
-| `npm run check:db` | 在 Docker 開一個全新的本機 PostgreSQL，套用全部 migration 後跑 SQL 檢查（要先下載 image，指令見 `AGENTS.md`） |
+| `npm run check:db` | 在全新的 Docker PostgreSQL 叢集中測試 migration 與空專案 baseline，並比對結構（先下載 image，指令見 `AGENTS.md`） |
 | `npm run build` | 正式 build。在本機執行時要加上下方的離線變數 |
 | `npm run start` | 啟動正式伺服器 |
 | `npm run test` | Vitest 單元、元件與整合測試 |

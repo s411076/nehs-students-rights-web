@@ -15,8 +15,9 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 ## Commands
 
 - `npm run check`: typecheck, lint, Vitest, offline production build and Playwright (loopback ports 4173/4174).
-- `npm run check:db`: migration and SQL gate in a fresh Docker cluster using the pinned Supabase image (see `CI check-db` below).
-- Real HTTP fixture: with Docker running, run `node scripts/local-stack/stack.mjs up` and set `STATE` to the printed file path. Run `node tests/real/boundary.http.mjs "$STATE"`, then `node scripts/local-stack/stack.mjs apply "$STATE" $(shasum -a 256 supabase/migrations/*.sql | awk '{print $1}')` (one SHA-256 per migration in `scripts/database/migrations.mjs` order), and rerun `node tests/real/boundary.http.mjs "$STATE"` followed by `node tests/real/workflow.http.mjs "$STATE"`.
+- `npm run check:db`: runs the auth contract and SQL suites on the migration chain and baseline in separate Docker clusters from the pinned Supabase image (see `CI check-db` below). Writes the migrated catalog to `.agent/catalog-fingerprint.json`.
+- `npm run check:db -- --write-baseline`: regenerate `supabase/baseline.sql` from the locally migrated fixture and verify both paths.
+- Real HTTP fixture: with Docker running, run `node scripts/local-stack/stack.mjs up` and set `STATE` to the printed file path. Run `node tests/real/boundary.http.mjs "$STATE"`, then `node scripts/local-stack/stack.mjs apply "$STATE" $(shasum -a 256 supabase/migrations/*.sql | awk '{print $1}')` (one SHA-256 per migration in filename order), and rerun `node tests/real/boundary.http.mjs "$STATE"` followed by `node tests/real/workflow.http.mjs "$STATE"`.
 - Browser QA: start a fresh real HTTP fixture as above, run the initial boundary test and apply the migration chain. Run `node scripts/local-stack/app.mjs "$STATE"` and open the printed `APP_URL`.
 - Fixture cleanup: stop the foreground app or gateway with Ctrl-C, then run `node scripts/local-stack/stack.mjs down "$STATE"`; if SQL application fails, discard the fixture and start fresh instead of retrying on it.
 - CI `check`: `npm ci`, `npx playwright install --with-deps chromium`, then `npm run check`.
@@ -47,6 +48,7 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 - Before touching anything in the database (tables, migrations, RLS, functions), read the Supabase agent skills first.
 - Before applying any future production migration, run the read-only `supabase/check-auth-contract.sql` unchanged in the Supabase SQL Editor or with `psql -X -v ON_ERROR_STOP=1 -f supabase/check-auth-contract.sql`. Stop on any error.
 - Check production migration history and apply only missing versions; all six SQL migrations in `supabase/migrations/` were applied in production as of 2026-11-28.
+- `supabase/baseline.sql` is only for empty projects; see the [rebuild procedure](README.md#rebuild-on-a-new-supabase-project). For a read-only comparison, run `supabase/catalog-fingerprint.sql` in the Supabase SQL Editor or SQL tool and compare the JSON with `.agent/catalog-fingerprint.json`.
 - Ship a migration that changes RPC signatures together with the matching site release; after raw-table privileges are revoked, rolling back only the app does not work.
 - Never `DISABLE RLS` or add broad grants to fix anything.
 

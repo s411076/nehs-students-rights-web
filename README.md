@@ -19,13 +19,36 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-publishable-key>
 
 The app reads only these two variables. Never use the service-role key, and never paste a real secret into the repository.
 
+## Rebuild on a new Supabase project
+
+1. Create a new, empty PostgreSQL 17 project in the Supabase Dashboard. Apply [`supabase/baseline.sql`](./supabase/baseline.sql) once as `postgres` in the SQL Editor, or run `psql -X -v ON_ERROR_STOP=1 -f supabase/baseline.sql` with the new project's `postgres` connection. The baseline is schema-only and is for empty projects only; never apply it to production.
+2. Run [`supabase/check-auth-contract.sql`](./supabase/check-auth-contract.sql) in the SQL Editor (or use the same `psql` command with this file). Stop if it raises an error.
+3. In the SQL Editor as `postgres`, add the initial administrators using the `INSERT` below.
+4. In **Authentication → Providers → Google**, enable Google and enter the Web OAuth client ID and secret. In Google Cloud, register the callback shown on that page (`https://<project-ref>.supabase.co/auth/v1/callback` for a standard project). In **Authentication → URL Configuration**, set **Site URL** to `https://<site-host>` and add `https://<site-host>/auth/callback` to **Redirect URLs**. For local development, also allow `http://localhost:3000/auth/callback`.
+5. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` as shown above, using the new project's URL and publishable key. Set both in your hosting environment before building.
+
+For future upgrades, the baseline already includes all migrations through the version listed in its header. Record those versions as applied if using the Supabase CLI migration history, then apply only later migrations.
+
+### Add or remove an administrator
+
+Use the SQL Editor as `postgres`. Replace the placeholder with the person's confirmed school email in lowercase. Run the statement for the operation you want:
+
+```sql
+-- Add (also used when setting up a new project)
+INSERT INTO public.admins (email) VALUES ('<account>@nehs.hc.edu.tw')
+ON CONFLICT (email) DO NOTHING;
+
+-- Remove
+DELETE FROM public.admins WHERE email = '<account>@nehs.hc.edu.tw';
+```
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Start the dev server at http://localhost:3000 |
 | `npm run check` | Typecheck, lint, Vitest, offline production build, then Playwright |
-| `npm run check:db` | Apply all migrations and run the SQL checks on a fresh local PostgreSQL in Docker (pull the image first; see `AGENTS.md`) |
+| `npm run check:db` | Test the migration chain and empty-project baseline in fresh Docker PostgreSQL clusters and compare their catalogs (pull the image first; see `AGENTS.md`) |
 | `npm run build` | Production build. Needs the offline variables below when run locally |
 | `npm run start` | Start the production server |
 | `npm run test` | Vitest unit, component and integration tests |

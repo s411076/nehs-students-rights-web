@@ -45,6 +45,7 @@ next-env.d.ts
 .vscode/
 
 # local test / tool artifacts (regenerated on every run, never commit)
+.agent/
 .playwright-mcp/
 playwright-report/
 test-results/

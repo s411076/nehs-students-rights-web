@@ -21,6 +21,7 @@ function sql(db, input) {
 }
 function file(path) { return readFileSync(resolve(root, path), 'utf8'); }
 
+// Export from an untouched clone. See tests/database/export-baseline-from-migrated-db.adr.md.
 if (process.argv[2] === '--export-baseline') {
   const source = process.argv[3];
   if (!/^rights_test_[a-z0-9_]+$/u.test(source ?? '')) throw new Error('Only a disposable cloned database may supply schema');
@@ -48,7 +49,7 @@ for (const entry of chain) {
   sql(db, entry.sql);
 }
 sql(db, file('tests/database/preservation-check.sql'));
-console.log('PASS: migration application and complete legacy row preservation');
+console.log('PASS: migration application, legacy object removal and retained row preservation');
 // Restored data is never read into this process: SQL tests see synthetic rows only.
 sql(db, `BEGIN;\n${file('tests/database/regression.sql')}\nCOMMIT;`);
 console.log('PASS: synthetic authorization, projection, pagination, version, audit and null-boundary tests');
@@ -61,7 +62,7 @@ writeFileSync(resolve(root, `tests/database/verification-${clone ? 'restored' : 
   command: `node scripts/database/regression.mjs${clone ? ' --restored' : ''}`,
   container, database: db, template: clone ? 'recovery' : 'template0',
   migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
-  passed: ['legacy-preservation', 'migration-application', 'authorization', 'projection', 'pagination', 'unicode-null-type-boundaries', 'versions-audit', 'multi-connection-creates', 'multi-connection-votes'],
+  passed: ['legacy-objects-absent', 'retained-rows-preserved', 'migration-application', 'authorization', 'projection', 'pagination', 'unicode-null-type-boundaries', 'versions-audit', 'multi-connection-creates', 'multi-connection-votes'],
   completedAt: new Date().toISOString(),
   productionConnection: false, recoveredRowsOutput: false,
 }, null, 2)}\n`);

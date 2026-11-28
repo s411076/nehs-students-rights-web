@@ -53,14 +53,13 @@ lib/auth/                    Server-side sign-in checks
 lib/rights/                  Contracts, validation, reads and writes
 supabase/migrations/         Database migrations, applied in filename order
 tests/                       Unit, component, integration, e2e and SQL tests
-docs/                        Database runbook and RPC contract
 ```
 
 There is no `/admin` page. Admins moderate directly on `/feedback` and `/proposals`, and manage announcements on `/`.
 
 ## Database changes
 
-Before deploying a new migration, check the production migration history and apply only the versions that are missing. The procedure is in `docs/database-hardening.md` and the RPC contract in `docs/database-hardening-contract.md`.
+See [AGENTS.md](./AGENTS.md#data) for the production migration procedure.
 
 ## Testing
 

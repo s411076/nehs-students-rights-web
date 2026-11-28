@@ -15,7 +15,12 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 ## Commands
 
 - `npm run check`: typecheck, lint, Vitest, offline production build and Playwright (loopback ports 4173/4174).
-- `npm run check:db`: apply the migration chain and run SQL gates on a fresh Docker PostgreSQL cluster using the cached Supabase image.
+- `npm run check:db`: portable migration and SQL gate (`node scripts/database/collapse-gate.mjs`); starts a fresh Docker PostgreSQL cluster from the cached Supabase image and needs no recovery container.
+- `node scripts/database/regression.mjs [--restored]` and `node scripts/database/managed-principal.mjs`: require the retained local Docker container `database-recovery-parity-20261016`; do not prune it or its volume. Use the synthetic run for application integration.
+- `node scripts/database/regression.mjs --export-baseline <db>`: re-export the schema-only fixture from an untouched disposable recovery clone.
+- Real HTTP fixture: with Docker and the retained recovery container running, run `node scripts/local-stack/stack.mjs up`, copy the printed path into `STATE`, run `node tests/real/boundary.http.mjs "$STATE"`, then `node scripts/local-stack/stack.mjs apply "$STATE" SHA256_1 SHA256_2 SHA256_3 SHA256_4 SHA256_5 SHA256_6` (one SHA-256 per migration in `scripts/database/migrations.mjs` order), rerun `node tests/real/boundary.http.mjs "$STATE"`, and run `node tests/real/workflow.http.mjs "$STATE"`.
+- Browser QA: run `node scripts/local-stack/app.mjs "$STATE"` against a fresh synthetic fixture after applying the migration chain, then open the printed `APP_URL`.
+- Fixture cleanup: stop the foreground app or gateway with Ctrl-C, then run `node scripts/local-stack/stack.mjs down "$STATE"`; if SQL application fails, discard the fixture and start fresh instead of retrying on it.
 - CI `check`: `npm ci`, `npx playwright install --with-deps chromium`, then `npm run check`.
 - CI `check-db`: `docker pull supabase/postgres@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`, then `npm run check:db`.
 - Update CI action pins: `gh actions-lock`, then `gh actions-lock --verify`.
@@ -42,6 +47,9 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 ## Data
 
 - Before touching anything in the database (tables, migrations, RLS, functions), read the Supabase agent skills first.
+- Check production migration history and apply only missing versions; all six SQL migrations in `supabase/migrations/` were applied in production as of 2026-11-28.
+- Ship a migration that changes RPC signatures together with the matching site release; after raw-table privileges are revoked, rolling back only the app does not work.
+- Never `DISABLE RLS` or add broad grants to fix anything.
 
 ## Design
 

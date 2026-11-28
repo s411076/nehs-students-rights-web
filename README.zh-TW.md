@@ -53,14 +53,13 @@ lib/auth/                    伺服器端的登入驗證
 lib/rights/                  介面定義、輸入驗證、讀取與寫入
 supabase/migrations/         資料庫 migration，依檔名順序套用
 tests/                       單元、元件、整合、e2e 與 SQL 測試
-docs/                        資料庫操作手冊與 RPC 規格
 ```
 
 網站沒有 `/admin` 後台。管理員直接在 `/feedback` 和 `/proposals` 頁面上審核，首頁公告則在 `/` 管理。
 
 ## 資料庫變更
 
-部署新的 migration 前，先查正式環境的 migration 紀錄，只套用還沒套用的版本。操作步驟見 `docs/database-hardening.md`，RPC 規格見 `docs/database-hardening-contract.md`。
+正式環境的 migration 操作步驟見 [AGENTS.md](./AGENTS.md#data)。
 
 ## 測試
 

@@ -25,8 +25,8 @@ function docker(args, input, stage = 'docker') {
   if (result.status !== 0) {
     const state = result.stderr?.match(/ERROR:\s+([A-Z0-9]{5})/u)?.[1] ?? 'LOCAL_PROCESS';
     const line = result.stderr?.match(/psql:<stdin>:(\d+):/u)?.[1] ?? 'unknown';
-    const assertion = stage === 'full SQL regression'
-      ? result.stderr?.match(/ERROR:\s+P0001: Regression assertion: ([A-Za-z0-9 ,_-]+)/u)?.[1]
+    const assertion = stage === 'preservation check' || stage === 'full SQL regression'
+      ? result.stderr?.match(/ERROR:\s+P0001: (Regression assertion: [A-Za-z0-9 ,_-]+|Legacy objects remain: [A-Za-z0-9_.,() ]+|Retained row preservation failed)/u)?.[1]
       : undefined;
     throw new Error(`${stage} failed (${state}, input line ${line}${assertion ? `, assertion: ${assertion}` : ''}); raw output withheld`);
   }
@@ -56,6 +56,7 @@ try {
     if (attempt === 1) throw new Error('Fresh cluster did not become ready');
   }
   isolated();
+  // Mirror the managed role limits. See create-policies-on-managed-auth-users.adr.md.
   sql('postgres', `CREATE ROLE postgres LOGIN NOSUPERUSER CREATEDB CREATEROLE BYPASSRLS;
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
     CREATE ROLE service_role NOLOGIN; CREATE ROLE supabase_auth_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -115,7 +116,7 @@ try {
   sql(database, 'DROP EVENT TRIGGER rights_principal_guard; DROP SCHEMA rights_principal_guard CASCADE;', 'supabase_admin', 'guard cleanup');
   // Preservation check reads executor-owned ballots; like the other runners
   // it executes as the superuser without printing rows.
-  sql(database, file('tests/database/preservation-check.sql'), 'supabase_admin', 'preservation check');
+  sql(database, `\\set VERBOSITY verbose\n${file('tests/database/preservation-check.sql')}`, 'supabase_admin', 'preservation check');
   const mapping = sql(database, `SELECT jsonb_build_object(
     'processing',(SELECT count(*) FROM public.proposals WHERE status='處理中'),
     'closed',(SELECT count(*) FROM public.proposals WHERE status='已結案'),
@@ -134,7 +135,7 @@ try {
     command: 'node scripts/database/collapse-gate.mjs', container, database, image,
     migrations: chain.map((entry) => ({ file: entry.file, sha256: entry.sha256 })),
     prerequisites: baseline, mappingCounts: counts,
-    passed: ['managed-principal', 'whole-chain', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],
+    passed: ['managed-principal', 'whole-chain', 'legacy-objects-absent', 'preservation-exact-mapping', 'effective-privilege-cleanup', 'full-sql-regression', 'multi-connection-creates', 'multi-connection-votes'],
     completedAt: new Date().toISOString(), productionConnection: false, recoveredRowsOutput: false,
   }, null, 2)}\n`);
   console.log('PASS: portable NOSUPERUSER postgres whole-chain collapse gate with cleanup and full SQL regression');

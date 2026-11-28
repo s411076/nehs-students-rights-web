@@ -17,6 +17,7 @@ export async function startGateway(state) {
     res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PATCH,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.url.startsWith('/rest/v1/')) {
+      // Keep the bridge internal. See scripts/local-stack/publish-internal-bridge-ports.adr.md.
       const args = ['exec', '-i', state.db, 'curl', '--silent', '--show-error',
         '--max-time', '10', '--include', '--http1.1', '--request', req.method,
         '--url', `${upstream.origin}${req.url.slice('/rest/v1'.length)}`];

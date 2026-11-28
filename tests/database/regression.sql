@@ -50,8 +50,6 @@ INSERT INTO public.proposals(id,title,content,status,author_name,is_anonymous,up
  VALUES ('20000000-0000-4000-8000-000000000001','synthetic concurrency','synthetic content','處理中','Legacy synthetic label',false,37,37),
  ('20000000-0000-4000-8000-000000000002','synthetic pending','synthetic content','待審核','Legacy synthetic label',false,0,0),
  ('20000000-0000-4000-8000-000000000003','synthetic legacy','synthetic content','legacy-invalid','Untrusted synthetic',true,0,0);
-INSERT INTO public.endorsements(user_id,target_id,target_type) VALUES
- ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','proposal');
 
 SAVEPOINT session_checks;
 UPDATE auth.sessions SET not_after=now()+interval '1 hour' WHERE user_id='10000000-0000-4000-8000-000000000010';
@@ -122,12 +120,9 @@ DO $$
 DECLARE t text; r text; f record; c record;
 BEGIN
   FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
-    FOREACH t IN ARRAY ARRAY['admins','endorsements','feedback','feedbacks','home_sections','profiles','proposal_comments','proposals','votes'] LOOP
+    FOREACH t IN ARRAY ARRAY['admins','feedback','home_sections','proposal_comments','proposals'] LOOP
       PERFORM rights_test.assert(NOT has_table_privilege(r,'public.'||t,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'), 'raw table grant revoked');
       PERFORM rights_test.assert((SELECT relrowsecurity FROM pg_class WHERE oid=('public.'||t)::regclass),'RLS enabled');
-    END LOOP;
-    FOR f IN SELECT oid FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('increment_endorsement','update_endorsement_count','update_proposal_endorsement_count','update_proposal_upvote_count') LOOP
-      PERFORM rights_test.assert(NOT has_function_privilege(r,f.oid,'EXECUTE'),'unsafe RPC overload revoked');
     END LOOP;
   END LOOP;
   FOR f IN SELECT p.*,n.nspname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='rights_private' OR (n.nspname='public' AND p.proname LIKE 'rights\_%' ESCAPE '\') LOOP
@@ -158,7 +153,6 @@ BEGIN
   SELECT * INTO f FROM pg_proc WHERE oid='rights_private.live_session_user()'::regprocedure;
   PERFORM rights_test.assert(f.prosecdef AND f.provolatile='s' AND NOT f.proretset AND f.prorettype='uuid'::regtype,
     'narrow stable session contract');
-  PERFORM rights_test.assert(NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.endorsements'::regclass AND NOT tgisinternal),'only verified counters retired');
 END $$;
 
 GRANT USAGE ON SCHEMA rights_test TO rights_executor;
@@ -175,7 +169,7 @@ SELECT rights_test.throws($q$SELECT * FROM rights_private.user_identity('1000000
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['admins','endorsements','feedback','feedbacks','home_sections','profiles','proposal_comments','proposals','votes'] LOOP
+  FOREACH t IN ARRAY ARRAY['admins','feedback','home_sections','proposal_comments','proposals'] LOOP
     PERFORM rights_test.throws(format('SELECT * FROM public.%I',t),'42501');
     PERFORM rights_test.throws(format('DELETE FROM public.%I',t),'42501');
   END LOOP;
@@ -183,7 +177,6 @@ END $$;
 SELECT rights_test.assert(NOT public.rights_is_admin(),'anon is not admin');
 SELECT rights_test.throws($q$ SELECT public.rights_admin_author('proposal','20000000-0000-4000-8000-000000000001') $q$,'42501');
 SELECT rights_test.throws($q$ SELECT public.rights_create_proposal(gen_random_uuid(),'x','body','其他') $q$,'42501');
-SELECT rights_test.throws($q$ SELECT public.increment_endorsement('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001') $q$,'42501');
 RESET ROLE;
 
 SET ROLE authenticated;
@@ -192,7 +185,7 @@ DO $$
 DECLARE t text; n integer; u uuid;
   forged jsonb := '{"email":"admin-synthetic@nehs.hc.edu.tw","user_metadata":{"role":"admin","email_verified":true}}';
 BEGIN
-  FOREACH t IN ARRAY ARRAY['admins','endorsements','feedback','feedbacks','home_sections','profiles','proposal_comments','proposals','votes'] LOOP
+  FOREACH t IN ARRAY ARRAY['admins','feedback','home_sections','proposal_comments','proposals'] LOOP
     PERFORM rights_test.throws(format('SELECT * FROM public.%I',t),'42501');
     PERFORM rights_test.throws(format('DELETE FROM public.%I',t),'42501');
   END LOOP;
@@ -226,7 +219,6 @@ END $$;
 SELECT rights_test.throws($q$SELECT public.rights_admin_author('proposal','20000000-0000-4000-8000-000000000001')$q$,'PT403');
 SELECT rights_test.throws($q$SELECT public.rights_list_pending_proposals()$q$,'PT403');
 SELECT rights_test.throws($q$SELECT public.rights_list_admin_feedback()$q$,'PT403');
-SELECT rights_test.throws($q$SELECT public.increment_endorsement('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002')$q$,'42501');
 SELECT rights_test.throws($q$INSERT INTO public.admins(email) VALUES ('student-1@nehs.hc.edu.tw')$q$,'42501');
 SELECT rights_test.throws($q$UPDATE public.proposals SET upvotes_count=999 WHERE id='20000000-0000-4000-8000-000000000001'$q$,'42501');
 SELECT rights_test.throws($q$SELECT rights_private.actor(true)$q$,'42501');
@@ -295,7 +287,7 @@ BEGIN
   j:=public.rights_add_comment(gen_random_uuid(),'20000000-0000-4000-8000-000000000001','anonymous synthetic comment',true); c:=(j->>'id')::uuid;
   j:=public.rights_list_public_comments('20000000-0000-4000-8000-000000000001');
   PERFORM rights_test.assert(EXISTS(SELECT 1 FROM jsonb_array_elements(j->'items') x WHERE x->>'id'=c::text AND x->>'author_name'='匿名學生' AND NOT x ? 'user_id'),'anonymous comment redaction');
-  PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)->>'upvotes_count'='38','baseline plus new vote not legacy ledger');
+  PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)->>'upvotes_count'='38','baseline plus one new vote');
   PERFORM rights_test.assert(public.rights_set_vote('20000000-0000-4000-8000-000000000001',true)->>'upvotes_count'='38','desired state idempotent');
   j:=public.rights_get_public_item('proposal','20000000-0000-4000-8000-000000000001');
   PERFORM rights_test.assert(j->>'version'='1' AND j->>'viewer_voted'='true' AND j->>'legacy_upvotes_count'='37','vote/comment no version bump');

@@ -68,7 +68,8 @@ export function useRightsQueue<T extends { readonly id: string }>(
       for (let index = 0; index < batchCount; index++) {
         const result = await readRights(queuePath(RIGHTS_QUEUE_PATH, { kind, filter, limit: 20, cursor: next, query }),
           value => parseQueuePage(value, itemParser, kind, filter));
-        if (!current()) return makeFailure('UNAVAILABLE');
+        // The newer request owns the queue and reports its own error state.
+        if (!current()) return { ok: true as const, superseded: true as const };
         if (kind === 'pending' && !verificationRef.current.isCurrent(readiness.epoch)) {
           setState({ ...previous, summary: null, status: 'error' });
           return makeFailure('UNAVAILABLE');
@@ -86,8 +87,9 @@ export function useRightsQueue<T extends { readonly id: string }>(
       setState({ scope, pages: append ? [...previous.pages, ...loaded] : loaded, summary, status: 'ready' });
       return { ok: true as const, data: loaded };
     } catch (error) {
-      if (current()) setState({ ...previous, summary: null, status: 'error' });
       if (!(error instanceof Error)) throw error;
+      if (!current()) return { ok: true as const, superseded: true as const };
+      setState({ ...previous, summary: null, status: 'error' });
       return makeFailure('UNAVAILABLE');
     } finally {
       if (pending.current === request) pending.current = null;

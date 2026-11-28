@@ -47,9 +47,9 @@ function ProposalsContent() {
     ? { all: proposals.counts.all, 處理中: proposals.counts.processing, 已結案: proposals.counts.closed } : null;
   const visible = linked.target ? [...rows, linked.target] : rows;
   const refresh = async () => {
-    const result = await proposals.refresh();
-    if (!result.ok || !isAdmin) return result;
-    return pending.refresh();
+    if (!isAdmin) return proposals.refresh();
+    const [publicResult, pendingResult] = await Promise.all([proposals.refresh(), pending.refresh()]);
+    return publicResult.ok ? pendingResult : publicResult;
   };
   return <main className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
     <div className={`${ui.card} flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-6`}>

@@ -21,6 +21,7 @@ function sql(db, input) {
 }
 function file(path) { return readFileSync(resolve(root, path), 'utf8'); }
 
+// Export from an untouched clone. See tests/database/export-baseline-from-migrated-db.adr.md.
 if (process.argv[2] === '--export-baseline') {
   const source = process.argv[3];
   if (!/^rights_test_[a-z0-9_]+$/u.test(source ?? '')) throw new Error('Only a disposable cloned database may supply schema');

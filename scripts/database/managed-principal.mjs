@@ -78,6 +78,7 @@ try {
   sql(container, database, file('tests/database/legacy-seed.sql'), undefined, 'synthetic legacy seed');
   const principalBefore = hash(sql(container, database, principal));
   if (principalBefore !== sourcePrincipalBefore) throw new Error('Managed postgres attributes differ from source');
+  // Check the managed role directly. See create-policies-on-managed-auth-users.adr.md.
   const prerequisites = sql(container, database, `SELECT jsonb_build_object(
     'principal',current_user,'superuser',(SELECT rolsuper FROM pg_roles WHERE rolname=current_user),
     'createrole',(SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user),

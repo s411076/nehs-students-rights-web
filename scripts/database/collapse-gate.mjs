@@ -56,6 +56,7 @@ try {
     if (attempt === 1) throw new Error('Fresh cluster did not become ready');
   }
   isolated();
+  // Mirror the managed role limits. See create-policies-on-managed-auth-users.adr.md.
   sql('postgres', `CREATE ROLE postgres LOGIN NOSUPERUSER CREATEDB CREATEROLE BYPASSRLS;
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
     CREATE ROLE service_role NOLOGIN; CREATE ROLE supabase_auth_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;

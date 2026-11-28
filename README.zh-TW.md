@@ -84,5 +84,3 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_pub
 npm run test -- tests/integration/rights-actions.test.ts
 npm run test:e2e -- tests/e2e/security-flows.spec.ts
 ```
-
-每個測試涵蓋哪些行為，見 `tests/BEHAVIORS.md`。

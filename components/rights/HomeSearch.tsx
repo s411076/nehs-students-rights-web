@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { isPublicStatus, toFeedbackPublicDTO, toProposalDTO } from '@/lib/rights/queries';
 import { countCodePoints } from '@/lib/rights/validation';
@@ -14,7 +14,6 @@ const MAX_RECENT_SEARCHES = 8;
 
 function loadRecentSearches(): string[] {
   try {
-    if (typeof window === 'undefined') return [];
     const parsed: unknown = JSON.parse(window.localStorage.getItem(RECENT_SEARCH_KEY) ?? '[]');
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string').slice(0, MAX_RECENT_SEARCHES) : [];
   } catch {
@@ -24,7 +23,15 @@ function loadRecentSearches(): string[] {
 
 export function HomeSearch() {
   const [query, setQuery] = useState('');
-  const [recents, setRecents] = useState<string[]>(loadRecentSearches);
+  const [recents, setRecents] = useState<string[]>([]);
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    queueMicrotask(() => {
+      // The browser may already have accepted text before React attached.
+      if (searchInput.current) setQuery(searchInput.current.value);
+      setRecents(loadRecentSearches());
+    });
+  }, []);
   const term = query.trim();
   const valid = countCodePoints(term) <= 100;
   const enabled = valid && term.length > 0;
@@ -58,7 +65,7 @@ export function HomeSearch() {
   return <div className={`${ui.card} p-5 mb-8`}>
     <label htmlFor="home-search" className="flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-neutral-400 mb-2"><Search aria-hidden="true" size={14} className="shrink-0" /> 搜尋全站提案與建言</label>
     <form onSubmit={event => { event.preventDefault(); if (enabled) rememberRecent(term); }}>
-      <input id="home-search" type="text" value={query} onChange={event => setQuery(event.target.value)}
+      <input ref={searchInput} id="home-search" type="text" value={query} onChange={event => setQuery(event.target.value)}
         placeholder="輸入關鍵字搜尋（如：鞦韆、午餐、體育...）" aria-describedby="home-search-scope"
         className={ui.field} />
     </form>

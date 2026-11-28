@@ -84,5 +84,3 @@ To run a single test file:
 npm run test -- tests/integration/rights-actions.test.ts
 npm run test:e2e -- tests/e2e/security-flows.spec.ts
 ```
-
-`tests/BEHAVIORS.md` lists what each test covers.

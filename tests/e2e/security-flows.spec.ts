@@ -144,9 +144,35 @@ test('editing an uncertain proposal draft starts a distinct submission', async (
   expect(rows.map(row => row.title)).toEqual(['[環境與設備] First draft', '[環境與設備] Revised draft']);
 });
 
-test('inline approval publishes the reviewed proposal', async ({ page, context }) => {
+test('inline approval refreshes pending proposals after switching public tabs', async ({ page, context }) => {
   await login(context, 'admin');
   await page.goto('/proposals');
-  await page.getByRole('button', { name: '核准上架' }).click();
-  await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'Fixture 待審核' })).toBeVisible();
+  const approve = page.getByRole('button', { name: '核准上架' });
+  const panel = page.getByRole('tabpanel');
+  await expect(panel.getByRole('heading', { name: 'Fixture 處理中', exact: true })).toBeVisible();
+  await expect(approve).toBeEnabled();
+
+  const isAllQueue = (url: URL) => url.pathname === '/api/rights/queue'
+    && url.searchParams.get('kind') === 'proposal' && url.searchParams.get('filter') === 'all';
+  const release = Promise.withResolvers<void>();
+  await page.route(isAllQueue, async route => {
+    const response = await route.fetch();
+    await release.promise;
+    await route.fulfill({ response });
+  }, { times: 1 });
+  const refreshingAll = page.waitForRequest(request => isAllQueue(new URL(request.url())));
+  try {
+    await approve.click();
+    await refreshingAll;
+    await page.getByRole('tab', { name: /^已結案/ }).click();
+    await expect(panel.getByText('目前尚無已結案的提案。')).toBeVisible();
+  } finally {
+    release.resolve();
+  }
+
+  const result = page.getByRole('status', { name: '清單操作結果' });
+  await expect(result).toContainText('操作已成功完成。');
+  await expect(approve).toHaveCount(0);
+  await page.getByRole('tab', { name: /^處理中/ }).click();
+  await expect(panel.getByRole('heading', { name: 'Fixture 待審核' })).toBeVisible();
 });

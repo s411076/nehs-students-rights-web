@@ -86,7 +86,7 @@ if (command === 'up') {
       break;
     case 'apply': {
       if (state.mode !== 'baseline' || !state.baselinePassed) throw new Error('Run baseline HTTP tests first');
-      const chain = verifyMigrationChain(resolve('.'), path => readFileSync(path, 'utf8'), expectedHashes);
+      const chain = verifyMigrationChain(resolve('.'), expectedHashes);
       for (const entry of chain) sql(state.db, entry.sql, 'postgres');
       sql(state.db, "NOTIFY pgrst, 'reload schema';");
       state.mode = 'hardened';

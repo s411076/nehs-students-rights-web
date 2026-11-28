@@ -1,4 +1,4 @@
--- Existing-schema cutover, NOT an initial schema. See tests/database/README.md.
+-- Existing-schema cutover, NOT an initial schema.
 -- Run once under a privileged migration principal, during write maintenance.
 BEGIN;
 SET LOCAL lock_timeout = '10s';

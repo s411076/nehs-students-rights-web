@@ -84,6 +84,13 @@ There is no `/admin` page. Admins moderate directly on `/feedback` and `/proposa
 
 See [AGENTS.md](./AGENTS.md#data) for the production migration procedure.
 
+## Production
+
+- The live site is hosted on Vercel at https://nehs-students-rights-web.vercel.app. Merging a pull request into `main` of `s411076/nehs-students-rights-web` deploys to Production automatically.
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` must be set in the Vercel project's environment variables; see [Setup](#setup). The build fails closed without them.
+- For database changes, see [Database changes](#database-changes) and [AGENTS.md](./AGENTS.md#data): run [`supabase/check-auth-contract.sql`](./supabase/check-auth-contract.sql) before applying a migration to production, and ship a migration that changes RPC signatures together with its matching site release — rolling back only the site does not work.
+- There is currently no data backup. [`supabase/baseline.sql`](./supabase/baseline.sql) rebuilds structure only, not data; see [Rebuild on a new Supabase project](#rebuild-on-a-new-supabase-project).
+
 ## Testing
 
 Integration and browser tests talk to a fake Auth/PostgREST server on localhost (`tests/fixtures/`), so you do not need a Supabase account or any secret. Before opening a pull request, run:

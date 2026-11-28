@@ -84,6 +84,13 @@ tests/                       單元、元件、整合、e2e 與 SQL 測試
 
 正式環境的 migration 操作步驟見 [AGENTS.md](./AGENTS.md#data)。
 
+## 正式環境
+
+- 正式站由 Vercel 代管，網址是 https://nehs-students-rights-web.vercel.app。合併 pull request 進 `s411076/nehs-students-rights-web` 的 `main` 分支後，會自動部署到正式環境。
+- 請在 Vercel 專案的環境變數設定 `NEXT_PUBLIC_SUPABASE_URL` 與 `NEXT_PUBLIC_SUPABASE_ANON_KEY`，見[環境設定](#環境設定)。缺少這兩個變數時，build 會直接失敗，不會部署設定錯誤的版本。
+- 資料庫變更見[資料庫變更](#資料庫變更)與 [AGENTS.md](./AGENTS.md#data)：套用 migration 到正式環境前，先執行 [`supabase/check-auth-contract.sql`](./supabase/check-auth-contract.sql)；改到 RPC 簽名的 migration 必須和對應的網站版本一起上線，只回退網站是沒有用的。
+- 目前沒有資料備份。[`supabase/baseline.sql`](./supabase/baseline.sql) 只能重建結構，無法還原資料，見[在全新的 Supabase 專案重建](#在全新的-supabase-專案重建)。
+
 ## 測試
 
 整合測試和瀏覽器測試連的是跑在本機的假 Auth/PostgREST 服務（`tests/fixtures/`），不需要 Supabase 帳號，也不需要任何金鑰。開 pull request 前請執行：

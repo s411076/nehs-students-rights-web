@@ -1,4 +1,6 @@
-CREATE SCHEMA auth;
+-- Data-free stand-in for the Auth objects used by the migration chain.
+CREATE SCHEMA auth AUTHORIZATION supabase_auth_admin;
+SET ROLE supabase_auth_admin;
 CREATE TABLE auth.users (
   id uuid PRIMARY KEY, email text, email_confirmed_at timestamptz,
   banned_until timestamptz, deleted_at timestamptz, is_anonymous boolean DEFAULT false,
@@ -14,7 +16,7 @@ CREATE TABLE auth.sessions (
 );
 ALTER TABLE auth.sessions ENABLE ROW LEVEL SECURITY;
 GRANT SELECT ON auth.sessions TO postgres WITH GRANT OPTION;
-GRANT USAGE ON SCHEMA auth TO anon,authenticated;
+GRANT USAGE ON SCHEMA auth TO postgres, anon, authenticated, service_role;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.sub',true),''),
     (NULLIF(current_setting('request.jwt.claims',true),'')::jsonb->>'sub'))::uuid
@@ -25,3 +27,4 @@ $$;
 CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('request.jwt.claims',true),'')::jsonb
 $$;
+RESET ROLE;

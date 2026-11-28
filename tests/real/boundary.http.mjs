@@ -39,14 +39,14 @@ try {
           role: name === 'anon' ? 'anon' : 'authenticated' });
       });
     }
-    await check('baseline public read reaches restored schema', async () => {
+    await check('baseline public read reaches legacy fixture schema', async () => {
       // Given the synthetic proposal; When anon reads; Then the fixture row is returned.
       const result = await client(state.tokens.anon).from('proposals').select('id,upvotes_count');
       assert.equal(result.error, null);
       assert.deepEqual(result.data, [{ id: '20000000-0000-4000-8000-000000000001', upvotes_count: 7 }]);
     });
     await check('baseline RLS denies anon announcement insert', async () => {
-      // Given anon; When inserting an announcement; Then the restored RLS policy rejects it.
+      // Given anon; When inserting an announcement; Then the legacy RLS policy rejects it.
       const result = await client(state.tokens.anon).from('home_sections').insert({ title: 'Denied', content: 'Synthetic' });
       assert.equal(result.status, 401); assert.equal(result.error.code, '42501');
     });

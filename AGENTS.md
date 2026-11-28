@@ -47,7 +47,7 @@ Next.js 16 App Router + Supabase. UI is Traditional Chinese; docs are English.
 
 - Before touching anything in the database (tables, migrations, RLS, functions), read the Supabase agent skills first.
 - Before applying any future production migration, run the read-only `supabase/check-auth-contract.sql` unchanged in the Supabase SQL Editor or with `psql -X -v ON_ERROR_STOP=1 -f supabase/check-auth-contract.sql`. Stop on any error.
-- Check production migration history and apply only missing versions; all six SQL migrations in `supabase/migrations/` were applied in production as of 2026-11-28.
+- Check production migration history and apply only missing versions; as of 2026-11-28, six of the seven SQL migrations in `supabase/migrations/` are applied in production. The seventh, `20261128091019_drop_legacy_rls_policies.sql`, is pending production application.
 - `supabase/baseline.sql` is only for empty projects; see the [rebuild procedure](README.md#rebuild-on-a-new-supabase-project). For a read-only comparison, run `supabase/catalog-fingerprint.sql` in the Supabase SQL Editor or SQL tool and compare the JSON with `.agent/catalog-fingerprint.json`.
 - Ship a migration that changes RPC signatures together with the matching site release; after raw-table privileges are revoked, rolling back only the app does not work.
 - Never `DISABLE RLS` or add broad grants to fix anything.

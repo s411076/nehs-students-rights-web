@@ -119,10 +119,18 @@ RELEASE SAVEPOINT session_checks;
 DO $$
 DECLARE t text; r text; f record; c record;
 BEGIN
+  PERFORM rights_test.assert(NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public'
+      AND (NOT starts_with(policyname, 'rights_executor_') OR roles<>ARRAY['rights_executor'::name])
+  ), 'public policies are exclusive to rights_executor');
+  PERFORM rights_test.assert(NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p') AND NOT relrowsecurity
+  ), 'RLS enabled on all public tables');
   FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
     FOREACH t IN ARRAY ARRAY['admins','feedback','home_sections','proposal_comments','proposals'] LOOP
       PERFORM rights_test.assert(NOT has_table_privilege(r,'public.'||t,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'), 'raw table grant revoked');
-      PERFORM rights_test.assert((SELECT relrowsecurity FROM pg_class WHERE oid=('public.'||t)::regclass),'RLS enabled');
     END LOOP;
   END LOOP;
   FOR f IN SELECT p.*,n.nspname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='rights_private' OR (n.nspname='public' AND p.proname LIKE 'rights\_%' ESCAPE '\') LOOP

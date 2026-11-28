@@ -68,9 +68,6 @@ export function ProposalVote({ item }: { readonly item: ProposalDTO }) {
       <ThumbsUp aria-hidden="true" className="size-4 shrink-0" /> {displayed.voted ? '已聯署 (點擊取消)' : '覆議/聯署'}{' '}
       <span className={ui.badge}>{displayed.count}</span>
     </button>
-    {item.legacy_upvotes_count > 0 && <p className="text-xs text-gray-500 dark:text-neutral-400">
-      含歷史連署 {item.legacy_upvotes_count} 票；取消只影響您的新連署，不會扣除歷史票數。
-    </p>}
     <ActionFeedback {...mutation.feedback} notice="" />
     {uncertain && <button type="button" onClick={() => void reconcile()}
       className={ui.secondaryButton}>更新連署狀態</button>}
